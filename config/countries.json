@@ -1,0 +1,241 @@
+{
+    "countries": [
+        {
+            "name": "United States",
+            "code": "us",
+            "iso_alpha2": "US",
+            "geofabrik_url": "https://download.geofabrik.de/north-america/us-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/north-america/us-latest.osm.pbf.md5",
+            "osm_relation_id": 148838,
+            "overpass_area_id": 3600148838,
+            "overpass_area_name": "United States",
+            "estimated_pbf_size_gb": 10.0,
+            "continent": "north-america",
+            "use_overpass_chunking": true,
+            "admin_subdivisions": "states"
+        },
+        {
+            "name": "China",
+            "code": "china",
+            "iso_alpha2": "CN",
+            "geofabrik_url": "https://download.geofabrik.de/asia/china-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/asia/china-latest.osm.pbf.md5",
+            "osm_relation_id": 270056,
+            "overpass_area_id": 3600270056,
+            "overpass_area_name": "中国",
+            "estimated_pbf_size_gb": 1.5,
+            "continent": "asia",
+            "use_overpass_chunking": true,
+            "admin_subdivisions": "provinces"
+        },
+        {
+            "name": "Russia",
+            "code": "russia",
+            "iso_alpha2": "RU",
+            "geofabrik_url": "https://download.geofabrik.de/russia-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/russia-latest.osm.pbf.md5",
+            "osm_relation_id": 60199,
+            "overpass_area_id": 3600060199,
+            "overpass_area_name": "Россия",
+            "estimated_pbf_size_gb": 3.5,
+            "continent": "europe-asia",
+            "use_overpass_chunking": true,
+            "admin_subdivisions": "federal_districts"
+        },
+        {
+            "name": "Canada",
+            "code": "canada",
+            "iso_alpha2": "CA",
+            "geofabrik_url": "https://download.geofabrik.de/north-america/canada-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/north-america/canada-latest.osm.pbf.md5",
+            "osm_relation_id": 1428125,
+            "overpass_area_id": 3601428125,
+            "overpass_area_name": "Canada",
+            "estimated_pbf_size_gb": 3.0,
+            "continent": "north-america",
+            "use_overpass_chunking": true,
+            "admin_subdivisions": "provinces"
+        },
+        {
+            "name": "Germany",
+            "code": "germany",
+            "iso_alpha2": "DE",
+            "geofabrik_url": "https://download.geofabrik.de/europe/germany-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/europe/germany-latest.osm.pbf.md5",
+            "osm_relation_id": 51477,
+            "overpass_area_id": 3600051477,
+            "overpass_area_name": "Deutschland",
+            "estimated_pbf_size_gb": 4.0,
+            "continent": "europe",
+            "use_overpass_chunking": false,
+            "admin_subdivisions": "bundeslaender"
+        },
+        {
+            "name": "Australia",
+            "code": "australia",
+            "iso_alpha2": "AU",
+            "geofabrik_url": "https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf.md5",
+            "osm_relation_id": 80500,
+            "overpass_area_id": 3600080500,
+            "overpass_area_name": "Australia",
+            "estimated_pbf_size_gb": 1.2,
+            "continent": "australia-oceania",
+            "use_overpass_chunking": false,
+            "admin_subdivisions": "states"
+        },
+        {
+            "name": "Argentina",
+            "code": "argentina",
+            "iso_alpha2": "AR",
+            "geofabrik_url": "https://download.geofabrik.de/south-america/argentina-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/south-america/argentina-latest.osm.pbf.md5",
+            "osm_relation_id": 286393,
+            "overpass_area_id": 3600286393,
+            "overpass_area_name": "Argentina",
+            "estimated_pbf_size_gb": 0.5,
+            "continent": "south-america",
+            "use_overpass_chunking": false,
+            "admin_subdivisions": "provinces"
+        },
+        {
+            "name": "Brazil",
+            "code": "brazil",
+            "iso_alpha2": "BR",
+            "geofabrik_url": "https://download.geofabrik.de/south-america/brazil-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/south-america/brazil-latest.osm.pbf.md5",
+            "osm_relation_id": 271888,
+            "overpass_area_id": 3600271888,
+            "overpass_area_name": "Brasil",
+            "estimated_pbf_size_gb": 1.8,
+            "continent": "south-america",
+            "use_overpass_chunking": false,
+            "admin_subdivisions": "states"
+        },
+        {
+            "name": "France",
+            "code": "france",
+            "iso_alpha2": "FR",
+            "geofabrik_url": "https://download.geofabrik.de/europe/france-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/europe/france-latest.osm.pbf.md5",
+            "osm_relation_id": 2202162,
+            "overpass_area_id": 3602202162,
+            "overpass_area_name": "France",
+            "estimated_pbf_size_gb": 4.5,
+            "continent": "europe",
+            "use_overpass_chunking": false,
+            "admin_subdivisions": "regions"
+        },
+        {
+            "name": "Japan",
+            "code": "japan",
+            "iso_alpha2": "JP",
+            "geofabrik_url": "https://download.geofabrik.de/asia/japan-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/asia/japan-latest.osm.pbf.md5",
+            "osm_relation_id": 382313,
+            "overpass_area_id": 3600382313,
+            "overpass_area_name": "日本",
+            "estimated_pbf_size_gb": 2.0,
+            "continent": "asia",
+            "use_overpass_chunking": false,
+            "admin_subdivisions": "prefectures"
+        },
+        {
+            "name": "South Africa",
+            "code": "south_africa",
+            "iso_alpha2": "ZA",
+            "geofabrik_url": "https://download.geofabrik.de/africa/south-africa-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/africa/south-africa-latest.osm.pbf.md5",
+            "osm_relation_id": 87565,
+            "overpass_area_id": 3600087565,
+            "overpass_area_name": "South Africa",
+            "estimated_pbf_size_gb": 0.3,
+            "continent": "africa",
+            "use_overpass_chunking": false,
+            "admin_subdivisions": "provinces"
+        },
+        {
+            "name": "Mexico",
+            "code": "mexico",
+            "iso_alpha2": "MX",
+            "geofabrik_url": "https://download.geofabrik.de/north-america/mexico-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/north-america/mexico-latest.osm.pbf.md5",
+            "osm_relation_id": 114686,
+            "overpass_area_id": 3600114686,
+            "overpass_area_name": "México",
+            "estimated_pbf_size_gb": 0.7,
+            "continent": "north-america",
+            "use_overpass_chunking": false,
+            "admin_subdivisions": "states"
+        },
+        {
+            "name": "United Kingdom",
+            "code": "uk",
+            "iso_alpha2": "GB",
+            "geofabrik_url": "https://download.geofabrik.de/europe/great-britain-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/europe/great-britain-latest.osm.pbf.md5",
+            "osm_relation_id": 62149,
+            "overpass_area_id": 3600062149,
+            "overpass_area_name": "United Kingdom",
+            "estimated_pbf_size_gb": 1.5,
+            "continent": "europe",
+            "use_overpass_chunking": false,
+            "admin_subdivisions": "countries"
+        },
+        {
+            "name": "Italy",
+            "code": "italy",
+            "iso_alpha2": "IT",
+            "geofabrik_url": "https://download.geofabrik.de/europe/italy-latest.osm.pbf",
+            "geofabrik_md5_url": "https://download.geofabrik.de/europe/italy-latest.osm.pbf.md5",
+            "osm_relation_id": 365331,
+            "overpass_area_id": 3600365331,
+            "overpass_area_name": "Italia",
+            "estimated_pbf_size_gb": 2.0,
+            "continent": "europe",
+            "use_overpass_chunking": false,
+            "admin_subdivisions": "regions"
+        }
+    ],
+    "railway_types": {
+        "tracks": [
+            "rail",
+            "narrow_gauge"
+        ],
+        "stations": [
+            "station",
+            "halt"
+        ],
+        "infrastructure": [
+            "signal",
+            "switch",
+            "crossing",
+            "level_crossing"
+        ],
+        "service": [
+            "spur",
+            "siding",
+            "yard"
+        ]
+    },
+    "default_extract_types": [
+        "rail",
+        "narrow_gauge",
+        "station",
+        "halt"
+    ],
+    "overpass_settings": {
+        "base_url": "https://overpass-api.de/api/interpreter",
+        "status_url": "https://overpass-api.de/api/status",
+        "default_timeout": 900,
+        "max_retries": 5,
+        "initial_backoff_seconds": 30,
+        "max_backoff_seconds": 300
+    },
+    "gcs_settings": {
+        "bucket_name": "artemis-railway-data",
+        "project_id": "fine-ring-505908-e6",
+        "region": "us-central1",
+        "storage_class": "STANDARD"
+    }
+}
