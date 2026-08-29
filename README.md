@@ -2,7 +2,7 @@
 
 ## Railway Network Intelligence Platform
 
-Extract, route, and visualize railway networks across 14 countries using OpenStreetMap data, spatial indexing, and graph-based pathfinding algorithms — all running on Google Cloud.
+Extract, route, and visualize railway networks across 14 countries using OpenStreetMap data, spatial indexing, graph-based pathfinding, and **Reinforcement Learning** — all running locally or on Google Cloud.
 
 ---
 
@@ -11,27 +11,42 @@ Extract, route, and visualize railway networks across 14 countries using OpenStr
 ```
 ARTEMIS/
 ├── config/
-│   └── countries.json              # Country metadata & download URLs
-├── data_preparation/               # Scripts to process map data and build graph
+│   └── countries.json                  # Country metadata & download URLs
+├── data_preparation/                   # Scripts to process map data and build graphs
 │   ├── 01_download_pbf.py
 │   ├── 02_extract_railway.py
-│   ├── ...
+│   ├── 03_convert_to_kml.py
+│   ├── 04_upload_to_gcs.py
+│   ├── 05_build_network_graph.py
+│   ├── backup_graphs.py
+│   ├── overpass_fallback.py
 │   └── pipeline.py
-├── core_engine/                    # A* pathfinding and visualization engine
-│   ├── 06_spatial_routing.py
-│   ├── 07_visualization_server.py
-│   └── 08_simulation_engine.py
+├── core_engine/                        # Routing, Visualization & Simulation
+│   ├── 06_spatial_routing.py           # KD-Tree + A* pathfinding engine
+│   ├── 07_visualization_server.py      # FastAPI server + Interactive dashboard
+│   └── 08_simulation_engine.py         # Legacy discrete-event simulation
 ├── versions/
-│   └── v1/                         # Centralized PPO RL Architecture
+│   ├── v1/                             # RL v1: Centralized PPO Architecture
+│   │   ├── scripts/
+│   │   │   ├── train_env.py
+│   │   │   └── train_ppo.py
+│   │   └── models/
+│   │       └── ppo_artemis_uk_final.zip
+│   └── v2/                             # RL v2: Decentralized Shared-Radar PPO (Active)
 │       ├── scripts/
-│       │   ├── train_env.py
-│       │   └── train_ppo.py
+│       │   ├── train_env_v2.py         # Gymnasium env with dynamic station injection
+│       │   ├── train_ppo_v2.py         # Training script with FlattenMultiAgentVecEnv
+│       │   └── rl_sim_controller.py    # Real-time simulation bridge for the dashboard
 │       ├── models/
-│       │   └── ppo_artemis_uk_final.zip
+│       │   ├── ppo_artemis_uk_final.zip        # Final model (5M steps)
+│       │   └── ppo_artemis_uk_*_steps.zip      # Checkpoints (640k–4.48M steps)
 │       └── logs/
 │           └── ppo_artemis_tensorboard/
-├── infra/
-├── data/                           # Generated data (not committed)
+├── infra/                              # GCP provisioning scripts
+├── data/                               # Generated data (not committed)
+├── docs/
+│   ├── project_history.md              # Full chronological dev log
+│   └── software_requirements_document.md
 ├── requirements.txt
 └── README.md
 ```
@@ -59,16 +74,19 @@ ARTEMIS/
 
 ## 🚀 Quick Start
 
-### 1. Local Setup (Development)
+### 1. Local Setup
 
 ```bash
 cd ARTEMIS
-python -m venv venv
-source venv/bin/activate      # Linux/Mac
-# venv\Scripts\activate       # Windows
 
-pip install -r requirements.txt
+# Install system dependencies (Ubuntu/Debian)
+sudo apt-get install -y python3-pip build-essential python3.10-dev
+
+# Install Python dependencies globally
+pip3 install --user -r requirements.txt
 ```
+
+> **Note:** A virtual environment is not required. The project runs with globally installed packages.
 
 ### 2. Run the Full Pipeline (Phase 1)
 
@@ -90,25 +108,78 @@ python data_preparation/pipeline.py --steps download extract
 python data_preparation/05_build_network_graph.py
 ```
 
-### 4. Run the Routing & Visualization Server (Phase 3)
+### 4. Run the RL Simulation Dashboard (Phase 5)
 
 ```bash
-# Install Phase 3 dependencies (if not already in VM startup script)
-pip install scipy fastapi uvicorn
-
-# Calculate a route from the CLI
-python core_engine/06_spatial_routing.py uk --start "51.5074,-0.1278" --end "55.9533,-3.1883"
-
-# Start the interactive web map
+# Start the interactive web dashboard
 python core_engine/07_visualization_server.py
-# Access at http://localhost:8000 (or via Vertex AI proxy at /proxy/8000/)
+# Access at http://127.0.0.1:8000/
 ```
 
-### 5. Backup Generated Graphs to GCS
+**Using the Dashboard:**
+1. Wait for the station list to load (hundreds of real UK stations).
+2. Select a **Start Station** and **End Station** from the dropdowns.
+3. Click **Add Train** to queue the route. Repeat for as many trains as you want.
+4. Click **Start Simulation** to watch the RL agent navigate all trains in real-time on the map.
+5. The simulation terminates automatically when all trains arrive at their destinations.
+
+### 5. Train a New RL Model (Optional)
+
+```bash
+# Train a PPO model on the UK network for 5M steps
+python versions/v2/scripts/train_ppo_v2.py --country uk --steps 5000000
+```
+
+### 6. Backup Generated Graphs to GCS
 
 ```bash
 python data_preparation/backup_graphs.py
 ```
+
+---
+
+## 📊 Pipeline Architecture
+
+```
+Phase 1: Data Acquisition       Phase 2: Graph Build        Phase 3: Routing Engine
+┌────────────────────────┐   ┌─────────────────────┐   ┌──────────────────────────┐
+│ 01_download_pbf.py     │   │ 05_build_network_    │   │ 06_spatial_routing.py    │
+│   Geofabrik → .osm.pbf │ → │   graph.py           │ → │   KD-Tree + A*           │
+│                        │   │   GeoJSON → GraphML  │   │   Pathfinding            │
+│ 02_extract_railway.py  │   │   ProcessPoolExec    │   └──────────────────────────┘
+│   osmium → pyrosm      │   │   (16 cores)         │              ↓
+│                        │   └─────────────────────┘   ┌──────────────────────────┐
+│ 03_convert_to_kml.py   │                             │ Phase 4: RL Training     │
+│   GeoJSON → Styled KML │                             │ v1: Centralized PPO      │
+│                        │                             │ v2: Decentralized Radar  │
+│ 04_upload_to_gcs.py    │                             │   (5M steps, UK)         │
+│   All files → GCS      │                             └──────────────────────────┘
+└────────────────────────┘                                         ↓
+                                                       ┌──────────────────────────┐
+                                                       │ Phase 5: Interactive     │
+                                                       │ Simulation Dashboard     │
+                                                       │ 07_visualization_server  │
+                                                       │   FastAPI + Leaflet.js   │
+                                                       │   Station Selection UI   │
+                                                       │   Real-time RL Sim       │
+                                                       └──────────────────────────┘
+```
+
+---
+
+## 🤖 Reinforcement Learning Architecture
+
+### v1: Centralized PPO (Deprecated)
+- **Observation:** Flattened state of all trains simultaneously `(num_agents * features)`.
+- **Action Space:** `MultiDiscrete([3] * num_agents)` — one action per train per step.
+- **Limitation:** Model is tightly coupled to a fixed number of agents. Cannot scale dynamically.
+
+### v2: Decentralized Shared-Radar PPO (Active)
+- **Observation:** Local radar per train `(3,)` — `[current_speed, edge_speed_limit, dist_to_nearest_train]`.
+- **Action Space:** `Discrete(3)` — Brake / Maintain / Accelerate.
+- **Key Innovation:** A custom `FlattenMultiAgentVecEnv` wrapper "unwraps" the multi-agent environment so SB3 sees each train as an independent single-agent env. This trains a **single shared policy** that is applied to every train independently.
+- **Scaling:** Because each train uses the same 3-feature radar, the model works with **any number of trains** at inference time without retraining.
+- **Trained:** 5,000,000 steps on the UK railway network with 4 agents, checkpointed every 640k steps.
 
 ---
 
@@ -117,12 +188,8 @@ python data_preparation/backup_graphs.py
 ### Vertex AI Notebook Instance
 
 ```bash
-# Provision the Notebook Instance
 chmod +x infra/vm_setup.sh
 ./infra/vm_setup.sh
-
-# Or with explicit project override
-./infra/vm_setup.sh --project fine-ring-505908-e6
 ```
 
 **Current Notebook Specifications:**
@@ -140,51 +207,6 @@ chmod +x infra/vm_setup.sh
 chmod +x infra/gcs_setup.sh
 ./infra/gcs_setup.sh
 ```
-
-### Deploy to Vertex AI Notebook
-
-```bash
-# Copy project files into the Jupyter workspace
-gcloud compute scp --recurse \
-    ./scripts ./config ./requirements.txt \
-    artemis-notebook:/home/jupyter/artemis/ \
-    --zone=us-central1-c
-
-# Access JupyterLab via Google Cloud Console:
-#   Vertex AI > Workbench > Instances > Click "OPEN JUPYTERLAB"
-```
-
----
-
-## 📊 Pipeline Architecture
-
-```
-Phase 1: Data Acquisition          Phase 2: Graph Build         Phase 3: Routing & Visualization
-┌──────────────────────────┐    ┌─────────────────────┐    ┌────────────────────────────────┐
-│ 01_download_pbf.py       │    │ 05_build_network_    │    │ 06_spatial_routing.py          │
-│   Geofabrik → .osm.pbf   │ →  │   graph.py           │ →  │   KD-Tree + A* Pathfinding     │
-│                          │    │   GeoJSON → GraphML  │    │                                │
-│ 02_extract_railway.py    │    │   ProcessPoolExec    │    │ 07_visualization_server.py     │
-│   osmium → pyrosm → GeoJ│    │   (16 cores)         │    │   FastAPI + Leaflet Map        │
-│                          │    │                     │    │   Station-to-Station Routing   │
-│ 03_convert_to_kml.py     │    │                     │    │   Inter-Country Graph Merging  │
-│   GeoJSON → Styled KML   │    └─────────────────────┘    │                                │
-│                          │              ↕                │ backup_graphs.py               │
-│ 04_upload_to_gcs.py      │    ┌─────────────────────┐    │   GraphML → GCS Persistence    │
-│   All files → GCS Bucket │    │ GCS Bucket           │    └────────────────────────────────┘
-└──────────────────────────┘    │ gs://artemis-railway │
-                                │   -data              │
-                                └─────────────────────┘
-```
-
-**Phase 1 Data Flow:**
-`.osm.pbf` (Geofabrik) → `.geojson` (categorized) → `.kml` (styled) → GCS Bucket
-
-**Phase 2 Data Flow:**
-`.geojson` (from GCS) → `NetworkX DiGraph` → `.graphml` → GCS Bucket
-
-**Phase 3 Data Flow:**
-`.graphml` → `KD-Tree Index` → `A* Routing` → `Leaflet Map Visualization`
 
 ---
 
@@ -220,8 +242,12 @@ Edit `config/countries.json` to:
 - **KD-Tree:** `scipy.spatial.cKDTree` provides O(log n) nearest-neighbor lookups for snapping GPS coordinates to railway nodes.
 - **Connected Component:** The Largest Strongly Connected Component is extracted to remove disconnected spurs and guarantee routability.
 - **Haversine Distance:** All edge weights and the A* heuristic use the Haversine formula for accurate great-circle distance on the Earth's surface.
-- **Inter-Country Routing:** When start and end countries differ, the backend dynamically merges both GraphML files using `nx.compose()`, building a unified cross-border routing graph.
-- **Station Routing:** The `/api/stations` endpoint parses `[country]_stations.geojson` files and serves named stations as searchable dropdowns. Results are cached in-memory.
+
+### Phase 5: RL Simulation Dashboard
+- **Interactive Station Selection:** The `/api/stations` endpoint parses `[country]_stations.geojson` and serves named stations as searchable dropdowns. Results are cached in-memory.
+- **Dynamic Train Spawning:** Users queue any number of trains with specific start/end stations. The `ArtemisTrainEnv` snaps coordinates to nearest graph nodes using the KD-Tree and computes A* paths.
+- **Auto-Termination:** The simulation server terminates automatically when all trains reach their destinations.
+- **Decentralized Inference:** The PPO model is called per-train per-tick with each train's local radar observation, producing independent speed decisions.
 
 ---
 
@@ -230,8 +256,8 @@ Edit `config/countries.json` to:
 1. **Overpass API limitations**: The Overpass API will timeout for large countries (US, Russia, China). Always use the Geofabrik pipeline for these.
 2. **Disk space**: Full pipeline needs ~200 GB for all 14 countries' PBF files.
 3. **Memory Optimization**: The pipeline uses `osmium-tool` for pre-filtering and a custom streaming KML writer, keeping RAM usage extremely low even for massive datasets (like the 10 GB US `.pbf`).
-4. **GCP Quotas**: The `us-central1` region has a 16 N2D vCPU quota and a 500 GB SSD quota. The VM is configured within these limits.
-5. **GCP credentials**: Set up `GOOGLE_APPLICATION_CREDENTIALS` or run `gcloud auth application-default login` before uploading.
+4. **C++ Compiler Required**: `build-essential` and `python3.10-dev` are required for compiling C extensions (`cykhash`, `pyrosm`).
+5. **Global Python:** Dependencies are installed globally via `pip3 install --user`. No virtual environment is used.
 
 ---
 

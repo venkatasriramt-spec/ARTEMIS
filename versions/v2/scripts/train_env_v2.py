@@ -23,10 +23,11 @@ class ArtemisTrainEnv(gym.Env):
     """
     metadata = {"render_modes": ["human"]}
 
-    def __init__(self, country_code="uk", num_agents=4):
+    def __init__(self, country_code="uk", num_agents=4, train_configs=None):
         super(ArtemisTrainEnv, self).__init__()
         
         self.num_agents = num_agents
+        self.train_configs = train_configs
         
         # 1. Load your Phase 3 Graph and Router
         self.router = RailwayRouter(country_code)
@@ -54,7 +55,7 @@ class ArtemisTrainEnv(gym.Env):
         self.path_indices = np.zeros(self.num_agents, dtype=int)
         
         self.steps = 0
-        self.max_steps = 1000 # Prevent infinite loops
+        self.max_steps = 20000 # Prevent infinite loops
         self.reached_destination = np.zeros(self.num_agents, dtype=bool)
 
     def reset(self, seed=None, options=None):
@@ -63,27 +64,45 @@ class ArtemisTrainEnv(gym.Env):
         
         nodes = list(self.graph.nodes())
         
-        for i in range(self.num_agents):
-            while True:
-                start = np.random.choice(nodes)
-                end = np.random.choice(nodes)
-                
-                if start == end:
-                    continue
-                    
-                # Ensure they are connected using A* router
+        if self.train_configs and len(self.train_configs) == self.num_agents:
+            for i, config in enumerate(self.train_configs):
+                start_node, _, _ = self.router.find_nearest_node(config["start_lat"], config["start_lon"])
+                end_node, _, _ = self.router.find_nearest_node(config["end_lat"], config["end_lon"])
                 try:
                     path = nx.astar_path(
-                        self.graph, start, end, 
+                        self.graph, start_node, end_node, 
                         heuristic=self.router._heuristic, weight=self.router._weight
                     )
-                    if len(path) > 1:
-                        self.current_nodes[i] = start
-                        self.target_nodes[i] = end
-                        self.optimal_paths[i] = path
-                        break
+                    self.current_nodes[i] = start_node
+                    self.target_nodes[i] = end_node
+                    self.optimal_paths[i] = path
                 except nx.NetworkXNoPath:
-                    continue
+                    logger.error(f"No path for train {i} between {start_node} and {end_node}. Defaulting to start node.")
+                    self.current_nodes[i] = start_node
+                    self.target_nodes[i] = start_node
+                    self.optimal_paths[i] = [start_node]
+        else:
+            for i in range(self.num_agents):
+                while True:
+                    start = np.random.choice(nodes)
+                    end = np.random.choice(nodes)
+                    
+                    if start == end:
+                        continue
+                        
+                    # Ensure they are connected using A* router
+                    try:
+                        path = nx.astar_path(
+                            self.graph, start, end, 
+                            heuristic=self.router._heuristic, weight=self.router._weight
+                        )
+                        if len(path) > 1:
+                            self.current_nodes[i] = start
+                            self.target_nodes[i] = end
+                            self.optimal_paths[i] = path
+                            break
+                    except nx.NetworkXNoPath:
+                        continue
 
         self.path_indices = np.zeros(self.num_agents, dtype=int)
         self.train_speeds = np.zeros(self.num_agents, dtype=np.float32)

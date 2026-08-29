@@ -1,14 +1,14 @@
 # ARTEMIS Software Requirements Document (SRD)
 
 **Project Name:** ARTEMIS (Autonomous Railway Throughput & Management Intelligent System)  
-**Version:** 2.0  
-**Last Updated:** 2026-08-20  
+**Version:** 3.0  
+**Last Updated:** 2026-08-29  
 
 ---
 
 ## 1. System Overview & Goals
 
-ARTEMIS is an intelligent system designed to autonomously manage railway throughput, optimize train scheduling, and simulate complex intercity and international routing at a global scale.
+ARTEMIS is an intelligent system designed to autonomously manage railway throughput, optimize train routing using reinforcement learning, and simulate complex intercity navigation on real-world railway networks at global scale.
 
 The project is divided into the following phases:
 
@@ -17,20 +17,23 @@ The project is divided into the following phases:
 | **Phase 1** | Data Acquisition & Pre-processing | ✅ Complete |
 | **Phase 2** | Network Graph Construction | ✅ Complete |
 | **Phase 3** | Spatial Indexing, Routing & Visualization | ✅ Complete |
-| **Phase 4** | Multi-Agent Train Simulation (RL) | 🔲 Not Started |
+| **Phase 4** | Discrete-Event Simulation (Legacy) | ⚠️ Superseded |
+| **Phase 5 (v1)** | Centralized PPO RL | ✅ Complete (Deprecated) |
+| **Phase 5 (v2)** | Decentralized Shared-Radar PPO RL | ✅ Complete & Active |
+| **Dashboard** | Interactive Train Dispatcher UI | ✅ Complete |
 
 ---
 
 ## 2. System Architecture
 
-### 2.1 Infrastructure (GCP)
-- **Compute:** Google Cloud Vertex AI Notebook Instance.
+### 2.1 Infrastructure
+- **Local Development:** Ubuntu/Debian desktop with Python 3.10+.
+  - Dependencies installed globally via `pip3 install --user`.
+  - C++ compiler (`build-essential`) required for extensions like `cykhash` and `pyrosm`.
+- **Cloud (Optional):** Google Cloud Vertex AI Notebook Instance.
   - Machine Type: `n2d-highmem-16` (16 vCPUs, 128 GB RAM).
-  - Boot Disk: 200 GB `PD_SSD` (fits GCP `SSD_TOTAL_GB` quota of 500 GB in `us-central1`).
-  - vCPU Quota: 16 N2D CPUs (fits GCP `N2D_CPUS` quota limit).
-- **Storage (Cloud):** Google Cloud Storage bucket `gs://artemis-railway-data` hosted in `us-central1`.
-  - Configured with Uniform Bucket-Level Access.
-  - Lifecycle Rules demoting old raw files to Nearline/Coldline storage.
+  - Boot Disk: 200 GB `PD_SSD`.
+- **Storage (Cloud):** Google Cloud Storage bucket `gs://artemis-railway-data` in `us-central1`.
 
 ### 2.2 Dependencies
 
@@ -43,9 +46,17 @@ The project is divided into the following phases:
 | `scipy` | ≥ 1.11.0 | KD-Tree spatial indexing |
 | `fastapi` | ≥ 0.100.0 | Web API server |
 | `uvicorn` | ≥ 0.23.0 | ASGI server |
+| `gymnasium` | ≥ 0.29.0 | RL environment framework |
+| `stable-baselines3[extra]` | ≥ 2.0.0 | PPO agent training & inference |
+| `torch` | (via SB3) | Neural network backend |
 | `google-cloud-storage` | ≥ 2.14.0 | GCS integration |
 | `osmium` | ≥ 3.7.0 | PBF streaming pre-filter |
-| `simplekml` / `fastkml` | ≥ 1.3.6 / ≥ 0.12 | KML generation |
+
+### 2.3 System Dependencies (apt)
+| Package | Purpose |
+|---------|---------|
+| `build-essential` | C/C++ compiler for extension modules |
+| `python3.10-dev` | Python development headers |
 
 ---
 
@@ -54,19 +65,15 @@ The project is divided into the following phases:
 ### 3.1 Pipeline Steps
 1. **Download (`01_download_pbf.py`)**: Concurrently fetches `.osm.pbf` files for 14 countries from Geofabrik using multi-threading.
 2. **Extract (`02_extract_railway.py`)**:
-   - *Prefilter:* Uses the C++ `osmium-tool` binary to stream the massive PBF files and discard all non-railway data, outputting a tiny, temporary `.osm.pbf` file (zero-memory overhead).
+   - *Prefilter:* Uses the C++ `osmium-tool` binary to stream the massive PBF files and discard all non-railway data.
    - *Parse:* Uses `pyrosm` to read the filtered PBF into GeoPandas DataFrames. Extracts tracks (`rail`, `narrow_gauge`) and stations (`station`, `halt`). Saves as `.geojson`.
-3. **Convert (`03_convert_to_kml.py`)**: Reads the GeoJSON and utilizes a custom *Streaming XML Generator* to dynamically write `.kml` text directly to disk. Applies color-coding (Red for mainline, Orange for stations).
-4. **Upload (`04_upload_to_gcs.py`)**: Uploads the raw PBFs, GeoJSON, and KML files to the GCS bucket concurrently.
+3. **Convert (`03_convert_to_kml.py`)**: Custom *Streaming XML Generator* to write `.kml` directly to disk.
+4. **Upload (`04_upload_to_gcs.py`)**: Uploads all files to the GCS bucket concurrently.
 
 ### 3.2 Data Flow
 ```
 .osm.pbf (Geofabrik) → osmium filter → pyrosm → .geojson → Streaming KML → .kml → GCS Bucket
 ```
-
-### 3.3 Optimizations
-- **Concurrency:** I/O tasks run with 16 parallel workers. Memory-intensive `pyrosm` extraction capped at 4.
-- **Memory Safety:** `osmium` pre-filtering prevents OOM on 10 GB+ files. Streaming KML writer prevents OOM on large XML DOMs.
 
 ---
 
@@ -74,15 +81,11 @@ The project is divided into the following phases:
 
 ### 4.1 Script: `05_build_network_graph.py`
 
-**Goal:** Transform raw GeoJSON track coordinates into a fully connected, traversable directed graph `G(V, E)`.
-
 **Architecture:**
-1. **GCS Integration:** Automatically downloads missing `[country]_tracks.geojson` and `[country]_stations.geojson` from `gs://artemis-railway-data/processed/geojson/`.
-2. **Geometry Processing:** Handles both `LineString` and `MultiLineString` geometries. MultiLineStrings are exploded into individual segments.
-3. **Node Creation:** Every GPS coordinate point in a track becomes a node. Node IDs are the full-precision `lon,lat` string representation, ensuring that overlapping track endpoints from different OSM ways are automatically merged.
-4. **Edge Creation:** Sequential coordinate pairs along a track become directed edges. Reverse edges are also added (bidirectional simplification). Edges carry attributes: `osm_id`, `name`, `railway`, `maxspeed`, `gauge`, `electrified`.
-5. **Output:** Saved as `.graphml` per country to `data/processed/graph/[country]/`.
-6. **Parallelism:** `ProcessPoolExecutor` distributes graph construction across all 16 vCPUs.
+1. Reads GeoJSON tracks, handles both `LineString` and `MultiLineString` geometries.
+2. Node IDs use full-precision `lon,lat` strings ensuring automatic merging of overlapping endpoints.
+3. Builds bidirectional `NetworkX DiGraph` with edge attributes: `osm_id`, `name`, `railway`, `maxspeed`, `gauge`, `electrified`.
+4. Exports as `.graphml` per country.
 
 ### 4.2 Verified Output (14 Countries)
 
@@ -105,58 +108,95 @@ The project is divided into the following phases:
 
 ---
 
-## 5. Phase 3: Spatial Indexing, Routing & Visualization
+## 5. Phase 3: Spatial Indexing & Routing Engine
 
-### 5.1 Routing Engine: `06_spatial_routing.py`
+### 5.1 `06_spatial_routing.py` — `RailwayRouter` Class
+1. **Graph Loading:** Loads `.graphml` files. Supports multi-country merging via `nx.compose()`.
+2. **Connected Component:** Extracts Largest Strongly Connected Component.
+3. **KD-Tree:** `scipy.spatial.cKDTree` for O(log n) nearest-neighbor GPS-to-node snapping.
+4. **A* Pathfinding:** `networkx.astar_path()` with Haversine heuristic.
 
-**`RailwayRouter` class:**
-1. **Graph Loading:** Loads `.graphml` files. Supports multiple countries via `nx.compose()` for inter-country routing.
-2. **Connected Component Extraction:** Extracts the Largest Strongly Connected Component to remove disconnected spurs and guarantee routability.
-3. **KD-Tree Spatial Index:** `scipy.spatial.cKDTree` built from all node coordinates. Provides O(log n) nearest-neighbor lookup for snapping arbitrary GPS coordinates to the nearest physical railway node.
-4. **A* Pathfinding:** Uses `networkx.astar_path()` with the Haversine formula as both the edge weight function and the heuristic. Haversine calculates the great-circle distance between two GPS points on the Earth's surface.
-5. **Inter-Country Routing:** When two different countries are specified, both graphs are loaded and composed into a single unified graph. Border-crossing tracks from Geofabrik extracts overlap, so the same node coordinates exist in both datasets, naturally bridging the border.
-
-### 5.2 Visualization Server: `07_visualization_server.py`
-
-**FastAPI + Leaflet.js web application:**
-- **Dynamic Configuration:** All 14 countries are loaded from `config/countries.json`.
-- **Map Click Mode:** Select Start/End country, click the map to place markers. The API calculates and draws the route.
-- **Station Select Mode:** Dropdown selection of real named train stations parsed from `[country]_stations.geojson`. Station lists are cached in-memory after first load.
-- **Auto-Pan:** Map automatically centers on the selected country.
-- **API Endpoints:**
-  - `GET /` — Serves the interactive map HTML.
-  - `GET /api/stations?country=xxx` — Returns named stations with GPS coordinates.
-  - `POST /api/route` — Accepts start/end country + coordinates, returns the route as a coordinate array with distance.
-
-### 5.3 GCS Backup: `backup_graphs.py`
-Uploads all generated `.graphml` files from `data/processed/graph/` to `gs://artemis-railway-data/processed/graph/` for persistence across VM lifecycle.
-
-### 5.4 Verified Routing Example
-- **Route:** London (51.5074, -0.1278) → Edinburgh (55.9533, -3.1883)
-- **Network:** United Kingdom (581,833 connected nodes)
-- **Result:** 6,722 nodes traversed, 637.23 km total distance
-- **Real-World Comparison:** East Coast Main Line is ~632 km. ✅
+### 5.2 Verified Routing Example
+- **Route:** London → Edinburgh — 6,722 nodes, 637.23 km (real: ~632 km ✅)
 
 ---
 
-## 6. Phase 4: Multi-Agent Train Simulation (Planned)
+## 6. Phase 5: Reinforcement Learning
 
-### 6.1 Goal
-Build a custom OpenAI Gymnasium reinforcement learning environment where multiple train agents navigate the physical railway graph simultaneously.
+### 6.1 v1 Architecture (Deprecated)
+- **Location:** `versions/v1/`
+- **Observation:** `Box(shape=(num_agents * 3,))` — flattened global state.
+- **Action:** `MultiDiscrete([3] * num_agents)` — joint action for all trains.
+- **Limitation:** Cannot scale to different numbers of trains without retraining.
 
-### 6.2 Architecture (Draft)
-1. **Environment:** Custom `gymnasium.Env` wrapping the Phase 3 `RailwayRouter`.
-2. **Agents:** Each train agent occupies a node on the graph and can move along edges.
-3. **Actions:** Accelerate, Brake, Switch Track, Wait.
-4. **Observations:** Current position, nearby trains, track attributes (maxspeed, gauge), signal states.
-5. **Rewards:** Arriving at destination quickly, maintaining schedule.
-6. **Penalties:** Collisions with other trains, exceeding track `maxspeed`, signal violations.
+### 6.2 v2 Architecture (Active)
+- **Location:** `versions/v2/`
+- **Environment:** `ArtemisTrainEnv` in `train_env_v2.py`.
+  - **Observation per train:** `Box(shape=(3,))` — `[speed, edge_speed_limit, dist_to_nearest_train]`.
+  - **Action per train:** `Discrete(3)` — Brake / Maintain / Accelerate.
+  - **Reward Function:**
+    - +1.0 for making progress (speed > 0).
+    - +100.0 for reaching the destination.
+    - -1.0 time penalty per step.
+    - -5.0 for exceeding the track speed limit.
+    - -1000.0 for collision (two trains on the same node).
+  - **Dynamic Station Injection:** `reset()` accepts optional `train_configs` with GPS coordinates, mapping them to nearest graph nodes via KD-Tree. Falls back to random stations if not provided.
+  - **Max Steps:** 20,000 (prevents premature truncation on long routes).
+
+- **Training:** `train_ppo_v2.py`
+  - `FlattenMultiAgentVecEnv` wrapper treats each train as an independent single-agent env for SB3.
+  - Trained for **5,000,000 steps** on UK network with 4 agents.
+  - Checkpoints every 640k steps; final model: `ppo_artemis_uk_final.zip`.
+
+- **Inference Controller:** `rl_sim_controller.py`
+  - Background thread calls `model.predict(obs[i])` per train per tick.
+  - Auto-terminates via `os._exit(0)` when all trains arrive.
+
+### 6.3 Key Design Decision: Decentralized Scaling
+The v2 model processes a 3-feature local radar for **one train at a time**. Because the policy is shared and independent, the same model works with 1, 10, or 100 trains without retraining.
 
 ---
 
-## 7. Non-Functional Requirements
+## 7. Interactive Simulation Dashboard
 
-- **Scalability:** The system handles graphs with millions of nodes (US: 4.6M nodes) within 128 GB RAM.
-- **Persistence:** All intermediate and final outputs are backed up to GCS. The VM can be safely deleted and recreated between phases.
-- **Cost Efficiency:** VM is stopped between work sessions. Lifecycle rules demote old GCS objects to cheaper storage tiers.
-- **Portability:** All scripts use relative paths from the project root. Configuration is centralized in `config/countries.json`.
+### 7.1 Server: `07_visualization_server.py`
+- **Framework:** FastAPI + Leaflet.js (Dark Mode).
+- **Root URL:** `http://127.0.0.1:8000/`
+
+### 7.2 API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Serves the simulation dashboard HTML |
+| `/api/stations?country=uk` | GET | Returns named UK stations with GPS coords |
+| `/api/rl_sim/start` | POST | Starts simulation with dynamic train list |
+| `/api/rl_sim/stop` | POST | Stops the running simulation |
+| `/api/rl_sim/state` | GET | Returns real-time positions of all trains |
+
+### 7.3 Start Request Payload
+```json
+{
+  "country": "uk",
+  "trains": [
+    {"start_lat": 51.53, "start_lon": -0.12, "end_lat": 55.95, "end_lon": -3.19},
+    {"start_lat": 53.48, "start_lon": -2.24, "end_lat": 51.45, "end_lon": -2.58}
+  ],
+  "speed_kmh": 120.0,
+  "tick_seconds": 60
+}
+```
+
+### 7.4 Frontend Features
+- **Station Dropdowns:** Populated from real UK station data.
+- **Train Queuing:** Add any number of trains with specific start/end stations.
+- **Live Map:** Leaflet markers move in real-time with emoji status indicators (🚆 en route, ✅ arrived).
+- **Stats Panel:** Live tick counter, active/blocked/arrived counts.
+- **Auto-Stop:** Frontend stops polling when all trains arrive.
+
+---
+
+## 8. Non-Functional Requirements
+
+- **Scalability:** Handles graphs with millions of nodes (US: 4.6M). RL model scales to arbitrary train counts.
+- **Persistence:** All outputs backed up to GCS.
+- **Portability:** All scripts use relative paths. Configuration centralized in `config/countries.json`.
+- **No Virtual Environment:** Dependencies installed globally for simplicity.
