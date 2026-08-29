@@ -185,23 +185,20 @@ Phase 1: Data Acquisition       Phase 2: Graph Build        Phase 3: Routing Eng
 
 ## ☁️ Google Cloud Setup
 
-### Vertex AI Notebook Instance
+### Desktop Virtualization
 
-```bash
-chmod +x infra/vm_setup.sh
-./infra/vm_setup.sh
-```
-
-**Current Notebook Specifications:**
+ARTEMIS was developed on a **GCP Virtual Desktop** (Chrome Remote Desktop / RDP on a Compute Engine instance). The underlying CPU instance type was changed as needed depending on the workload — scaled up for heavy graph processing and RL training, and scaled down during lighter development work.
 
 | Setting | Value | Rationale |
 |---------|-------|-----------|
-| Machine Type | `n2d-highmem-16` | 16 vCPUs, 128 GB RAM for graph processing & multi-country routing |
+| Machine Type | Adjusted as needed (e.g., `n2d-highmem-16`) | Scaled up/down for graph processing, RL training, or light development |
 | Boot Disk | 200 GB SSD (`PD_SSD`) | Fits GCP SSD quota (500 GB limit in `us-central1`) |
-| OS/Environment | Google Deep Learning VM | Pre-installed JupyterLab, Git, conda, Python 3 |
+| OS | Ubuntu / Debian with Desktop Environment | Full GUI for development, browser-based visualization testing |
 | Region | `us-central1` | Low-cost, good connectivity |
 
 ### GCS Bucket
+
+Data persistence is handled via Google Cloud Storage:
 
 ```bash
 chmod +x infra/gcs_setup.sh

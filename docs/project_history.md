@@ -10,7 +10,7 @@ This document records the chronological development of ARTEMIS, including all ma
 - **Created** initial project structure: `config/`, `scripts/`, `infra/`, `docs/`, `data/`.
 - **Defined** the 14 target countries in `config/countries.json` with Geofabrik download URLs, OSM relation IDs, and Overpass area IDs.
 - **Created** `infra/gcs_setup.sh` to provision the GCS bucket `gs://artemis-railway-data` in `us-central1` with Uniform Bucket-Level Access and lifecycle rules for cost optimization.
-- **Created** `infra/vm_setup.sh` to provision a Vertex AI Notebook Instance.
+- **Created** `infra/vm_setup.sh` to provision a GCP Compute Engine instance for desktop virtualization.
   - Initial machine type: `e2-highmem-8` (8 vCPUs, 64 GB RAM).
   - Startup script auto-installs: `gdal-bin`, `libgdal-dev`, `osmium-tool`, `pyrosm`, `geopandas`, `shapely`, `simplekml`, `fastkml`, `networkx`.
 

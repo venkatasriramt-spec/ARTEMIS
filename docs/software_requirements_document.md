@@ -30,8 +30,8 @@ The project is divided into the following phases:
 - **Local Development:** Ubuntu/Debian desktop with Python 3.10+.
   - Dependencies installed globally via `pip3 install --user`.
   - C++ compiler (`build-essential`) required for extensions like `cykhash` and `pyrosm`.
-- **Cloud (Optional):** Google Cloud Vertex AI Notebook Instance.
-  - Machine Type: `n2d-highmem-16` (16 vCPUs, 128 GB RAM).
+- **Cloud (Optional):** GCP Virtual Desktop (Compute Engine instance with desktop environment).
+  - Machine Type: Adjusted as needed (e.g., `n2d-highmem-16` for heavy workloads).
   - Boot Disk: 200 GB `PD_SSD`.
 - **Storage (Cloud):** Google Cloud Storage bucket `gs://artemis-railway-data` in `us-central1`.
 
