@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
-ARTEMIS - RL Simulation Dashboard
-==================================
-A FastAPI backend serving:
-1. Interactive Train Dispatcher UI (station selection, train queuing)
-2. Real-time RL simulation with live Leaflet.js map visualization
-3. Station API for UK railway stations
+ARTEMIS - UK Railway Network Visualizer
+========================================
+Single-page web app that renders the entire UK railway network on a map.
+Tracks with active trains are highlighted in a distinct color.
 """
 
 import os
@@ -13,89 +11,104 @@ import sys
 import json
 import threading
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
 import geopandas as gpd
+import networkx as nx
 
-# Import our router from 06_spatial_routing
+# Imports
 base_dir = Path(__file__).resolve().parent.parent
 sys.path.append(str(base_dir / "scripts"))
-sys.path.append(str(base_dir)) # Add root to path for versions module
+sys.path.append(str(base_dir))
 try:
     from importlib import import_module
     routing_module = import_module("06_spatial_routing")
     RailwayRouter = routing_module.RailwayRouter
-
-
     rl_module = import_module("versions.v2.scripts.rl_sim_controller")
     RLSimController = rl_module.RLSimController
 except ImportError as e:
     print(f"Error: Could not import modules: {e}")
     sys.exit(1)
 
-app = FastAPI(title="ARTEMIS Railway Routing API")
+app = FastAPI(title="ARTEMIS UK Railway Network")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ── State ──
+rl_sim = None
+station_cache = None
+network_geojson_cache = None
 
-# Global caches
-rl_active_simulation = None
-station_cache = {}
+# ═══════════════════════════════════════════════════════════
+# API Endpoints
+# ═══════════════════════════════════════════════════════════
 
 @app.get("/api/stations")
-def get_stations(country: str = "uk"):
-    if country in station_cache:
-        return station_cache[country]
-        
-    geojson_path = base_dir / "data" / "processed" / "geojson" / country / f"{country}_stations.geojson"
+def get_stations():
+    global station_cache
+    if station_cache is not None:
+        return station_cache
+
+    geojson_path = base_dir / "data" / "processed" / "geojson" / "uk" / "uk_stations.geojson"
     if not geojson_path.exists():
         return []
-        
-    try:
-        gdf = gpd.read_file(geojson_path)
-        stations = []
-        
-        name_col = None
-        for candidate in ['name', 'tags.name', 'Name', 'NAME']:
-            if candidate in gdf.columns:
-                name_col = candidate
-                break
-        
-        if name_col is None:
-            for idx, row in gdf.iterrows():
-                if row.geometry and row.geometry.geom_type == 'Point':
-                    stations.append({
-                        "name": f"Station #{idx}",
-                        "lon": row.geometry.x,
-                        "lat": row.geometry.y
-                    })
-        else:
-            named_stations = gdf[gdf[name_col].notna() & (gdf[name_col] != '')]
-            named_stations = named_stations.sort_values(name_col)
-            for _, row in named_stations.iterrows():
-                if row.geometry and row.geometry.geom_type == 'Point':
-                    stations.append({
-                        "name": str(row[name_col]),
-                        "lon": row.geometry.x,
-                        "lat": row.geometry.y
-                    })
-                
-        station_cache[country] = stations
-        return stations
-    except Exception as e:
-        print(f"Error loading stations: {e}")
-        return []
+    
+    gdf = gpd.read_file(geojson_path)
+    stations = []
+    name_col = None
+    for c in ['name', 'tags.name', 'Name', 'NAME']:
+        if c in gdf.columns:
+            name_col = c
+            break
+    
+    if name_col:
+        named = gdf[gdf[name_col].notna() & (gdf[name_col] != '')].sort_values(name_col)
+        for _, row in named.iterrows():
+            if row.geometry and row.geometry.geom_type == 'Point':
+                stations.append({"name": str(row[name_col]), "lon": row.geometry.x, "lat": row.geometry.y})
+    else:
+        for idx, row in gdf.iterrows():
+            if row.geometry and row.geometry.geom_type == 'Point':
+                stations.append({"name": f"Station #{idx}", "lon": row.geometry.x, "lat": row.geometry.y})
+    
+    station_cache = stations
+    return stations
 
-# ═══════════════════════════════════════════════════════════
-# Simulation Dashboard Endpoints
-# ═══════════════════════════════════════════════════════════
+@app.get("/api/network")
+def get_network():
+    """Returns downsampled UK railway tracks as GeoJSON."""
+    global network_geojson_cache
+    if network_geojson_cache is not None:
+        return JSONResponse(content=network_geojson_cache)
+
+    graph_path = base_dir / "data" / "processed" / "graph" / "uk" / "uk_network.graphml"
+    if not graph_path.exists():
+        return JSONResponse(content={"type": "FeatureCollection", "features": []})
+
+    print("Loading UK railway network for visualization...")
+    G = nx.read_graphml(graph_path)
+    edges = list(G.edges())
+    step = max(1, len(edges) // 20000)
+    sampled = edges[::step]
+
+    features = []
+    for u, v in sampled:
+        try:
+            ud, vd = G.nodes[u], G.nodes[v]
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": [[float(ud['x']), float(ud['y'])], [float(vd['x']), float(vd['y'])]]},
+                "properties": {}
+            })
+        except (KeyError, ValueError):
+            continue
+
+    geojson = {"type": "FeatureCollection", "features": features}
+    network_geojson_cache = geojson
+    print(f"Network ready: {len(features):,} segments (sampled from {len(edges):,} edges)")
+    return JSONResponse(content=geojson)
 
 class TrainConfig(BaseModel):
     start_lat: float
@@ -103,262 +116,404 @@ class TrainConfig(BaseModel):
     end_lat: float
     end_lon: float
 
-class SimStartRequest(BaseModel):
-    country: str = "uk"
+class AddTrainsRequest(BaseModel):
     trains: List[TrainConfig]
-    speed_kmh: float = 120.0
-    tick_seconds: int = 60
 
-@app.post("/api/rl_sim/start")
-def start_rl_simulation(req: SimStartRequest):
-    global rl_active_simulation
-    if rl_active_simulation and rl_active_simulation.running:
-        return {"status": "already_running"}
-        
-    country = req.country.lower()
-    train_configs = [t.dict() for t in req.trains]
-    rl_active_simulation = RLSimController(country=country, trains=train_configs)
-    rl_active_simulation.start()
-    return {"status": "started", "trains": rl_active_simulation.num_agents}
+@app.post("/api/trains/add")
+def add_trains(req: AddTrainsRequest):
+    global rl_sim
+    configs = [t.dict() for t in req.trains]
 
-@app.post("/api/rl_sim/stop")
-def stop_rl_simulation():
-    global rl_active_simulation
-    if rl_active_simulation:
-        rl_active_simulation.stop()
-        rl_active_simulation = None
-    return {"status": "stopped"}
+    if rl_sim is None or not rl_sim.running:
+        # First train(s) — start the simulation
+        rl_sim = RLSimController(country="uk", trains=configs)
+        rl_sim.start()
+        return {"status": "started", "count": len(configs)}
+    else:
+        # Hot-add to running simulation
+        rl_sim.add_trains(configs)
+        return {"status": "added", "count": len(configs)}
 
-@app.get("/api/rl_sim/state")
-def get_rl_sim_state():
-    if not rl_active_simulation:
-        return {"running": False, "trains": [], "stats": {}}
-    return rl_active_simulation.get_state()
+@app.post("/api/trains/clear")
+def clear_trains():
+    global rl_sim
+    if rl_sim:
+        rl_sim.stop()
+        rl_sim = None
+    return {"status": "cleared"}
+
+@app.get("/api/trains/state")
+def get_train_state():
+    if not rl_sim or not rl_sim.running:
+        return {"trains": [], "active_edges": []}
+
+    state = rl_sim.get_state()
+    raw_edges = rl_sim.get_active_edges()
+    env = rl_sim.env
+
+    edge_coords = []
+    for u, v in raw_edges:
+        try:
+            ud, vd = env.router.G.nodes[u], env.router.G.nodes[v]
+            edge_coords.append([[float(ud['x']), float(ud['y'])], [float(vd['x']), float(vd['y'])]])
+        except (KeyError, ValueError):
+            continue
+
+    # Build the full path for each active train as coordinate arrays
+    train_paths = []
+    for i in range(env.num_agents):
+        if not env.reached_destination[i]:
+            path = env.optimal_paths[i]
+            coords = []
+            # Sample the path to keep it manageable (every 10th node)
+            step = max(1, len(path) // 200)
+            for j in range(0, len(path), step):
+                nd = env.router.G.nodes[path[j]]
+                coords.append([float(nd['x']), float(nd['y'])])
+            if coords:
+                train_paths.append(coords)
+
+    return {
+        "trains": state.get("trains", []),
+        "stats": state.get("stats", {}),
+        "active_edges": edge_coords,
+        "train_paths": train_paths
+    }
+
+# ═══════════════════════════════════════════════════════════
+# The One Page
+# ═══════════════════════════════════════════════════════════
 
 @app.get("/", response_class=HTMLResponse)
-def simulation_dashboard():
-    html = """<!DOCTYPE html>
-<html>
+def index():
+    return HTMLResponse(content=PAGE_HTML)
+
+PAGE_HTML = r"""<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>ARTEMIS - Train Simulation</title>
-    <meta charset="utf-8" />
+    <title>ARTEMIS — UK Railway Network</title>
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <meta name="description" content="ARTEMIS — Live visualization of the entire UK railway network powered by Reinforcement Learning">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; background: #0f172a; color: #e2e8f0; }
-        #map { height: 100vh; width: 100vw; }
-        #panel {
-            position: absolute; top: 20px; right: 20px; z-index: 1000;
-            background: #1e293b; padding: 20px; border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.4); width: 340px;
-            max-height: 90vh; overflow-y: auto;
+        :root {
+            --bg-deep: #050a14;
+            --bg-panel: rgba(10, 18, 36, 0.92);
+            --bg-card: rgba(15, 25, 45, 0.85);
+            --border: rgba(56, 189, 248, 0.12);
+            --border-hover: rgba(56, 189, 248, 0.3);
+            --text: #c8d6e5;
+            --text-dim: #5a6e82;
+            --text-bright: #f0f4f8;
+            --accent: #38bdf8;
+            --accent-glow: rgba(56, 189, 248, 0.15);
+            --track-idle: #1a2640;
+            --track-active: #f59e0b;
+            --track-path: #38bdf8;
+            --green: #22c55e;
+            --red: #ef4444;
         }
-        h2 { margin-top: 0; color: #38bdf8; }
-        label { font-size: 13px; font-weight: bold; color: #94a3b8; }
-        select, input { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box;
-            background: #334155; border: 1px solid #475569; color: #e2e8f0; border-radius: 4px; }
-        .btn { padding: 10px; border: none; border-radius: 6px; cursor: pointer;
-            width: 100%; margin-top: 10px; font-weight: bold; font-size: 14px; }
-        .btn-start { background: #22c55e; color: white; }
-        .btn-start:hover { background: #16a34a; }
-        .btn-stop { background: #ef4444; color: white; }
-        .btn-stop:hover { background: #dc2626; }
-        .btn-reset { background: #6366f1; color: white; }
-        .btn-reset:hover { background: #4f46e5; }
-        .stat-box { display: flex; justify-content: space-between; background: #334155;
-            padding: 8px 12px; border-radius: 6px; margin-top: 6px; }
-        .stat-label { color: #94a3b8; font-size: 12px; }
-        .stat-value { color: #f1f5f9; font-weight: bold; font-size: 16px; }
-        .train-list { max-height: 200px; overflow-y: auto; margin-top: 10px; }
-        .train-item { background: #334155; padding: 6px 10px; border-radius: 4px; margin-top: 4px; font-size: 12px; }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html { height: 100%; font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-deep); color: var(--text); overflow: hidden; }
+        #map { position: fixed; inset: 0; z-index: 1; }
+
+        /* ── Top bar ── */
+        #topbar {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 24px;
+            background: linear-gradient(180deg, rgba(5,10,20,0.95) 0%, rgba(5,10,20,0.7) 80%, transparent 100%);
+            pointer-events: none;
+        }
+        #topbar > * { pointer-events: auto; }
+        .logo { display: flex; align-items: center; gap: 10px; }
+        .logo-icon { font-size: 22px; }
+        .logo-text { font-size: 16px; font-weight: 700; color: var(--text-bright); letter-spacing: -0.5px; }
+        .logo-sub { font-size: 11px; color: var(--text-dim); font-weight: 400; margin-left: 2px; }
+        .stats-bar { display: flex; gap: 20px; align-items: center; }
+        .stat { text-align: center; }
+        .stat-val { font-size: 18px; font-weight: 700; color: var(--text-bright); }
+        .stat-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-top: 1px; }
+
+        /* ── Side panel ── */
+        #panel {
+            position: fixed; top: 60px; right: 16px; bottom: 16px; z-index: 1000;
+            width: 320px; background: var(--bg-panel);
+            border-radius: 16px; border: 1px solid var(--border);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            display: flex; flex-direction: column;
+            box-shadow: 0 16px 64px rgba(0,0,0,0.6);
+            overflow: hidden;
+            transition: transform 0.3s ease;
+        }
+        .panel-header { padding: 16px 18px 12px; border-bottom: 1px solid var(--border); }
+        .panel-header h3 { font-size: 13px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; }
+        .panel-body { flex: 1; overflow-y: auto; padding: 14px 18px; }
+        .panel-footer { padding: 12px 18px; border-top: 1px solid var(--border); }
+
+        label { display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-dim); margin-top: 12px; margin-bottom: 4px; }
+        label:first-child { margin-top: 0; }
+        select {
+            width: 100%; padding: 9px 10px; background: var(--bg-deep); border: 1px solid var(--border);
+            color: var(--text); border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 12px;
+            appearance: none; cursor: pointer; transition: border-color 0.2s;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%235a6e82'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 10px center;
+        }
+        select:focus { outline: none; border-color: var(--accent); }
+
+        .btn {
+            width: 100%; padding: 10px; border: none; border-radius: 8px; cursor: pointer;
+            font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600;
+            letter-spacing: 0.3px; transition: all 0.15s ease;
+        }
+        .btn:active { transform: scale(0.97); }
+        .btn-add { background: linear-gradient(135deg, #0ea5e9, #0369a1); color: white; margin-top: 14px; }
+        .btn-add:hover { background: linear-gradient(135deg, #38bdf8, #0ea5e9); box-shadow: 0 4px 16px rgba(14, 165, 233, 0.3); }
+        .btn-clear { background: transparent; color: var(--text-dim); border: 1px solid var(--border); font-size: 11px; }
+        .btn-clear:hover { border-color: var(--red); color: var(--red); }
+
+        .train-queue { margin-top: 16px; }
+        .train-queue-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-dim); margin-bottom: 6px; }
+        .queue-item {
+            display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+            background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+            margin-bottom: 4px; font-size: 11px; color: var(--text);
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+        .queue-idx { font-weight: 700; color: var(--accent); min-width: 18px; }
+        .queue-route { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .queue-status { font-size: 14px; }
+        .queue-pct { font-size: 10px; color: var(--text-dim); min-width: 32px; text-align: right; }
+
+        /* ── Legend ── */
+        .legend { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+        .legend-item { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--text-dim); }
+        .legend-line { width: 24px; height: 3px; border-radius: 2px; }
+
+        /* ── Loading overlay ── */
+        #loading {
+            position: fixed; inset: 0; z-index: 9999;
+            background: var(--bg-deep);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: opacity 0.6s ease;
+        }
+        #loading.hidden { opacity: 0; pointer-events: none; }
+        .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { margin-top: 16px; font-size: 13px; color: var(--text-dim); }
+        .loading-sub { margin-top: 4px; font-size: 11px; color: var(--text-dim); opacity: 0.5; }
+
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
     </style>
 </head>
 <body>
-    <div id="panel">
-        <h2>ARTEMIS Train Dispatcher</h2>
 
-        <div style="background: #334155; padding: 10px; border-radius: 6px; margin-bottom: 15px;">
-            <label>Start Station:</label>
-            <select id="start-station"><option>Loading...</option></select>
-            <label>End Station:</label>
-            <select id="end-station"><option>Loading...</option></select>
-            <button class="btn" style="background:#0ea5e9; color:white;" onclick="addTrain()">Add Train</button>
-        </div>
+<div id="loading">
+    <div class="spinner"></div>
+    <div class="loading-text">Loading UK Railway Network</div>
+    <div class="loading-sub">608,000+ nodes · 1,200,000+ edges</div>
+</div>
 
-        <div id="pending-trains" style="margin-bottom:15px; font-size:12px; color:#cbd5e1; max-height:100px; overflow-y:auto;"></div>
-
-        <button class="btn btn-start" onclick="startSim()">Start Simulation</button>
-        <button class="btn btn-stop" onclick="stopSim()">Stop</button>
-        <button class="btn btn-reset" onclick="resetSim()">Reset</button>
-
-        <div style="margin-top: 15px;">
-            <div class="stat-box">
-                <div><div class="stat-label">Tick</div><div class="stat-value" id="s-tick">0</div></div>
-                <div><div class="stat-label">Active</div><div class="stat-value" id="s-active" style="color:#22c55e;">0</div></div>
-                <div><div class="stat-label">Blocked</div><div class="stat-value" id="s-blocked" style="color:#f59e0b;">0</div></div>
-                <div><div class="stat-label">Arrived</div><div class="stat-value" id="s-arrived" style="color:#38bdf8;">0</div></div>
-            </div>
-        </div>
-
-        <div class="train-list" id="train-list"></div>
+<div id="topbar">
+    <div class="logo">
+        <span class="logo-icon">🚄</span>
+        <span class="logo-text">ARTEMIS <span class="logo-sub">UK Railway Network</span></span>
     </div>
-    <div id="map"></div>
+    <div class="stats-bar">
+        <div class="stat"><div class="stat-val" id="s-segments">—</div><div class="stat-lbl">Track Segments</div></div>
+        <div class="stat"><div class="stat-val" id="s-trains" style="color:var(--accent);">0</div><div class="stat-lbl">Active Trains</div></div>
+        <div class="stat"><div class="stat-val" id="s-arrived" style="color:var(--green);">0</div><div class="stat-lbl">Arrived</div></div>
+    </div>
+</div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        const map = L.map('map').setView([53.5, -2.5], 6);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: 'OpenStreetMap CARTO'
+<div id="panel">
+    <div class="panel-header"><h3>Train Dispatcher</h3></div>
+    <div class="panel-body">
+        <label>Origin Station</label>
+        <select id="sel-start"><option>Loading stations...</option></select>
+        <label>Destination Station</label>
+        <select id="sel-end"><option>Loading stations...</option></select>
+        <button class="btn btn-add" onclick="dispatchTrain()">Deploy Train</button>
+
+        <div class="train-queue" id="train-queue"></div>
+
+        <div class="legend">
+            <div class="legend-item"><div class="legend-line" style="background:var(--track-idle);"></div> Idle Track</div>
+            <div class="legend-item"><div class="legend-line" style="background:var(--track-path);"></div> Train Route</div>
+            <div class="legend-item"><div class="legend-line" style="background:var(--track-active);"></div> Active Segment</div>
+        </div>
+    </div>
+    <div class="panel-footer">
+        <button class="btn btn-clear" onclick="clearAll()">Clear All Trains</button>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── Map ──
+const map = L.map('map', { zoomControl: false }).setView([54.5, -3.5], 6);
+L.control.zoom({ position: 'bottomleft' }).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ', maxZoom: 16
+}).addTo(map);
+
+let trackLayer = null;
+let activeLayer = null;
+let pathLayer = null;
+let trainMarkers = {};
+let pollTimer = null;
+
+// ── Load Network ──
+async function loadNetwork() {
+    try {
+        const res = await fetch('api/network');
+        const geojson = await res.json();
+        trackLayer = L.geoJSON(geojson, {
+            style: { color: '#1a2640', weight: 1.2, opacity: 0.8 },
+            interactive: false
         }).addTo(map);
+        document.getElementById('s-segments').textContent = geojson.features.length.toLocaleString();
+        document.getElementById('loading').classList.add('hidden');
+    } catch(e) {
+        document.querySelector('.loading-text').textContent = 'Failed to load network';
+        console.error(e);
+    }
+}
 
-        let trainMarkers = {};
-        let pollInterval = null;
-        let pendingTrains = [];
+// ── Load Stations ──
+async function loadStations() {
+    try {
+        const res = await fetch('api/stations');
+        const stations = await res.json();
+        let html = '<option value="">Choose station…</option>';
+        stations.forEach(s => { html += `<option value="${s.lat},${s.lon}">${s.name}</option>`; });
+        document.getElementById('sel-start').innerHTML = html;
+        document.getElementById('sel-end').innerHTML = html;
+    } catch(e) { console.error(e); }
+}
 
-        async function loadStations() {
-            try {
-                const res = await fetch('api/stations?country=uk');
-                const stations = await res.json();
-                let opts = '<option value="">Select a station...</option>';
-                stations.forEach(s => {
-                    opts += `<option value="${s.lat},${s.lon}">${s.name}</option>`;
-                });
-                document.getElementById('start-station').innerHTML = opts;
-                document.getElementById('end-station').innerHTML = opts;
-            } catch(e) {
-                console.error("Failed to load stations", e);
+// ── Dispatch ──
+async function dispatchTrain() {
+    const sv = document.getElementById('sel-start').value;
+    const ev = document.getElementById('sel-end').value;
+    if (!sv || !ev) return alert('Select both origin and destination');
+    if (sv === ev) return alert('Origin and destination must differ');
+
+    const [slat, slon] = sv.split(',').map(Number);
+    const [elat, elon] = ev.split(',').map(Number);
+
+    await fetch('api/trains/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trains: [{ start_lat: slat, start_lon: slon, end_lat: elat, end_lon: elon }] })
+    });
+
+    if (!pollTimer) pollTimer = setInterval(pollState, 600);
+}
+
+async function clearAll() {
+    await fetch('api/trains/clear', { method: 'POST' });
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (activeLayer) { map.removeLayer(activeLayer); activeLayer = null; }
+    if (pathLayer) { map.removeLayer(pathLayer); pathLayer = null; }
+    Object.values(trainMarkers).forEach(m => map.removeLayer(m));
+    trainMarkers = {};
+    document.getElementById('train-queue').innerHTML = '';
+    document.getElementById('s-trains').textContent = '0';
+    document.getElementById('s-arrived').textContent = '0';
+}
+
+// ── Poll ──
+async function pollState() {
+    try {
+        const res = await fetch('api/trains/state');
+        const data = await res.json();
+        const trains = data.trains || [];
+        const stats = data.stats || {};
+
+        document.getElementById('s-trains').textContent = stats.active || 0;
+        document.getElementById('s-arrived').textContent = stats.arrived || 0;
+
+        // Update active edge overlay
+        if (activeLayer) map.removeLayer(activeLayer);
+        if (data.active_edges && data.active_edges.length > 0) {
+            const feats = data.active_edges.map(e => ({
+                type: 'Feature', geometry: { type: 'LineString', coordinates: e }
+            }));
+            activeLayer = L.geoJSON({ type: 'FeatureCollection', features: feats }, {
+                style: { color: '#f59e0b', weight: 3.5, opacity: 1 }, interactive: false
+            }).addTo(map);
+        }
+
+        // Update train route paths
+        if (pathLayer) map.removeLayer(pathLayer);
+        if (data.train_paths && data.train_paths.length > 0) {
+            const feats = data.train_paths.map(coords => ({
+                type: 'Feature', geometry: { type: 'LineString', coordinates: coords }
+            }));
+            pathLayer = L.geoJSON({ type: 'FeatureCollection', features: feats }, {
+                style: { color: '#38bdf8', weight: 2, opacity: 0.5 }, interactive: false
+            }).addTo(map);
+        }
+
+        // Train markers
+        const seen = new Set();
+        let queueHtml = '';
+        trains.forEach((t, idx) => {
+            seen.add(t.id);
+            const ll = [t.lat, t.lon];
+            const icon = L.divIcon({
+                className: '',
+                html: `<div style="font-size:16px;filter:drop-shadow(0 0 4px rgba(56,189,248,0.6));">${t.status === 'ARRIVED' ? '✅' : '🚆'}</div>`,
+                iconSize: [20, 20],
+                iconAnchor: [10 + (idx % 4) * 5, 10 + Math.floor(idx / 4) * 5]
+            });
+            if (trainMarkers[t.id]) {
+                trainMarkers[t.id].setLatLng(ll).setIcon(icon);
+            } else {
+                trainMarkers[t.id] = L.marker(ll, { icon }).addTo(map);
             }
-        }
-        
-        loadStations();
+            trainMarkers[t.id].bindPopup(`<b>${t.id}</b><br>Speed: ${t.speed_kmh} km/h<br>Progress: ${t.progress}%`);
 
-        function addTrain() {
-            const startVal = document.getElementById('start-station').value;
-            const endVal = document.getElementById('end-station').value;
-            if (!startVal || !endVal) return alert("Select both start and end stations");
-            
-            const [slat, slon] = startVal.split(',').map(Number);
-            const [elat, elon] = endVal.split(',').map(Number);
-            
-            const startName = document.getElementById('start-station').options[document.getElementById('start-station').selectedIndex].text;
-            const endName = document.getElementById('end-station').options[document.getElementById('end-station').selectedIndex].text;
-            
-            pendingTrains.push({
-                start_lat: slat, start_lon: slon, end_lat: elat, end_lon: elon,
-                name: `${startName} → ${endName}`
-            });
-            updatePendingUI();
-        }
+            const statusIcon = t.status === 'ARRIVED' ? '✅' : '🟢';
+            queueHtml += `<div class="queue-item">
+                <span class="queue-idx">T${idx}</span>
+                <span class="queue-status">${statusIcon}</span>
+                <span class="queue-route">${t.origin?.substring(0,20) || '?'} → ${t.destination?.substring(0,20) || '?'}</span>
+                <span class="queue-pct">${t.progress}%</span>
+            </div>`;
+        });
 
-        function updatePendingUI() {
-            let html = '<b>Pending Trains:</b><br>';
-            pendingTrains.forEach((t, i) => {
-                html += `<div style="margin-top:4px;">🚆 T${i}: ${t.name}</div>`;
-            });
-            document.getElementById('pending-trains').innerHTML = html;
-        }
+        document.getElementById('train-queue').innerHTML = trains.length > 0
+            ? `<div class="train-queue-title">Active Trains (${trains.length})</div>${queueHtml}`
+            : '';
 
-        function getIcon(status) {
-            const emoji = status === 'BLOCKED' ? '🟡' : status === 'ARRIVED' ? '✅' : '🚆';
-            return L.divIcon({className: '', html: '<div style="font-size:18px;">' + emoji + '</div>', iconSize: [20, 20], iconAnchor: [10, 10]});
-        }
+        Object.keys(trainMarkers).forEach(id => {
+            if (!seen.has(id)) { map.removeLayer(trainMarkers[id]); delete trainMarkers[id]; }
+        });
+    } catch(e) { /* ignore */ }
+}
 
-        async function startSim() {
-            if (pendingTrains.length === 0) return alert("Please add at least one train!");
-            
-            const payload = {
-                country: 'uk',
-                trains: pendingTrains,
-                speed_kmh: 120.0,
-                tick_seconds: 60
-            };
-
-            await fetch('api/rl_sim/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (pollInterval) clearInterval(pollInterval);
-            pollInterval = setInterval(pollState, 500);
-        }
-
-        async function stopSim() {
-            await fetch('api/rl_sim/stop', { method: 'POST' });
-            if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-        }
-
-        async function resetSim() {
-            await fetch('api/rl_sim/stop', { method: 'POST' });
-            
-            if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-            Object.values(trainMarkers).forEach(m => map.removeLayer(m));
-            trainMarkers = {};
-            pendingTrains = [];
-            updatePendingUI();
-            document.getElementById('train-list').innerHTML = '';
-            document.getElementById('s-tick').innerText = '0';
-            document.getElementById('s-active').innerText = '0';
-            document.getElementById('s-blocked').innerText = '0';
-            document.getElementById('s-arrived').innerText = '0';
-        }
-
-        async function pollState() {
-            try {
-                const res = await fetch('api/rl_sim/state');
-                const data = await res.json();
-
-                if (data.stats) {
-                    document.getElementById('s-tick').innerText = data.stats.tick || 0;
-                    document.getElementById('s-active').innerText = data.stats.active || 0;
-                    document.getElementById('s-blocked').innerText = data.stats.blocked || 0;
-                    document.getElementById('s-arrived').innerText = data.stats.arrived || 0;
-                }
-
-                const seenIds = new Set();
-                let listHtml = '';
-
-                (data.trains || []).forEach(t => {
-                    seenIds.add(t.id);
-                    const latlng = L.latLng(t.lat, t.lon);
-
-                    if (trainMarkers[t.id]) {
-                        trainMarkers[t.id].setLatLng(latlng);
-                        trainMarkers[t.id].setIcon(getIcon(t.status));
-                    } else {
-                        trainMarkers[t.id] = L.marker(latlng, { icon: getIcon(t.status) }).addTo(map);
-                    }
-                    trainMarkers[t.id].bindPopup(
-                        '<b>' + t.id + '</b><br>' + t.origin + ' to ' + t.destination +
-                        '<br>' + t.distance_km + ' / ' + t.total_km + ' km<br>Status: ' + t.status
-                    );
-
-                    const emoji = t.status === 'EN_ROUTE' ? '🟢' : t.status === 'BLOCKED' ? '🟡' : '🔵';
-                    listHtml += '<div class="train-item">' + emoji + ' ' + t.id + ': ' +
-                        t.origin.substring(0,18) + ' → ' + t.destination.substring(0,18) +
-                        ' (' + t.progress + '%)</div>';
-                });
-
-                document.getElementById('train-list').innerHTML = listHtml;
-
-                Object.keys(trainMarkers).forEach(id => {
-                    if (!seenIds.has(id)) { map.removeLayer(trainMarkers[id]); delete trainMarkers[id]; }
-                });
-
-                if (data.stats && data.stats.arrived === data.stats.total_trains && data.stats.total_trains > 0) {
-                    clearInterval(pollInterval); pollInterval = null;
-                }
-            } catch(e) { console.error('Poll error:', e); }
-        }
-    </script>
+// ── Init ──
+loadNetwork();
+loadStations();
+</script>
 </body>
 </html>"""
-    return HTMLResponse(content=html)
 
 if __name__ == "__main__":
     import uvicorn
-    print("="*60)
-    print("Starting ARTEMIS Server (Simulation Only)...")
-    print("Simulation:    http://127.0.0.1:8000/")
-    print("="*60)
+    print("=" * 60)
+    print("  ARTEMIS — UK Railway Network Visualizer")
+    print("  http://127.0.0.1:8000/")
+    print("=" * 60)
     uvicorn.run("07_visualization_server:app", host="0.0.0.0", port=8000, reload=True)

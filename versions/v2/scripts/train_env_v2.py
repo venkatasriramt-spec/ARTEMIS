@@ -243,6 +243,30 @@ class ArtemisTrainEnv(gym.Env):
             
         return obs
 
+    def add_agent(self, config):
+        """Dynamically add a new train agent to the running environment."""
+        start_node, _, _ = self.router.find_nearest_node(config["start_lat"], config["start_lon"])
+        end_node, _, _ = self.router.find_nearest_node(config["end_lat"], config["end_lon"])
+        
+        try:
+            path = nx.astar_path(
+                self.graph, start_node, end_node,
+                heuristic=self.router._heuristic, weight=self.router._weight
+            )
+        except nx.NetworkXNoPath:
+            logger.error(f"No path between {start_node} and {end_node}. Skipping.")
+            return False
+        
+        self.num_agents += 1
+        self.current_nodes.append(start_node)
+        self.target_nodes.append(end_node)
+        self.optimal_paths.append(path)
+        self.path_indices = np.append(self.path_indices, 0)
+        self.train_speeds = np.append(self.train_speeds, np.float32(0.0))
+        self.reached_destination = np.append(self.reached_destination, False)
+        
+        return True
+
     def render(self):
         """Optional: print current status to console."""
         print(f"--- Step {self.steps} ---")
