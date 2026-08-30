@@ -78,36 +78,21 @@ def get_stations():
 
 @app.get("/api/network")
 def get_network():
-    """Returns downsampled UK railway tracks as GeoJSON."""
+    """Returns the continuous UK railway tracks as GeoJSON."""
     global network_geojson_cache
     if network_geojson_cache is not None:
         return JSONResponse(content=network_geojson_cache)
 
-    graph_path = base_dir / "data" / "processed" / "graph" / "uk" / "uk_network.graphml"
-    if not graph_path.exists():
+    geojson_path = base_dir / "data" / "processed" / "geojson" / "uk" / "uk_network_lines.geojson"
+    if not geojson_path.exists():
         return JSONResponse(content={"type": "FeatureCollection", "features": []})
 
-    print("Loading UK railway network for visualization...")
-    G = nx.read_graphml(graph_path)
-    edges = list(G.edges())
-    step = max(1, len(edges) // 20000)
-    sampled = edges[::step]
+    print("Loading UK continuous railway network for visualization...")
+    with open(geojson_path, 'r') as f:
+        geojson = json.load(f)
 
-    features = []
-    for u, v in sampled:
-        try:
-            ud, vd = G.nodes[u], G.nodes[v]
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": [[float(ud['x']), float(ud['y'])], [float(vd['x']), float(vd['y'])]]},
-                "properties": {}
-            })
-        except (KeyError, ValueError):
-            continue
-
-    geojson = {"type": "FeatureCollection", "features": features}
     network_geojson_cache = geojson
-    print(f"Network ready: {len(features):,} segments (sampled from {len(edges):,} edges)")
+    print(f"Network ready: {len(geojson['features']):,} continuous track segments.")
     return JSONResponse(content=geojson)
 
 class TrainConfig(BaseModel):
@@ -195,31 +180,28 @@ PAGE_HTML = r"""<!DOCTYPE html>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="ARTEMIS — Live visualization of the entire UK railway network powered by Reinforcement Learning">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDPafdh7eH7MG3HbWNPc3w14BNj8XqRGcE"></script>
     <style>
         :root {
             --bg-deep: #050a14;
             --bg-panel: rgba(10, 18, 36, 0.92);
             --bg-card: rgba(15, 25, 45, 0.85);
             --border: rgba(56, 189, 248, 0.12);
-            --border-hover: rgba(56, 189, 248, 0.3);
             --text: #c8d6e5;
             --text-dim: #5a6e82;
             --text-bright: #f0f4f8;
             --accent: #38bdf8;
-            --accent-glow: rgba(56, 189, 248, 0.15);
-            --track-idle: #1a2640;
+            --track-idle: #64748b;
             --track-active: #f59e0b;
-            --track-path: #38bdf8;
+            --track-path: #0284c7;
             --green: #22c55e;
             --red: #ef4444;
         }
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        body, html { height: 100%; font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-deep); color: var(--text); overflow: hidden; }
+        body, html { height: 100%; font-family: 'Inter', sans-serif; background: var(--bg-deep); color: var(--text); overflow: hidden; }
         #map { position: fixed; inset: 0; z-index: 1; }
 
-        /* ── Top bar ── */
         #topbar {
             position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
             display: flex; align-items: center; justify-content: space-between;
@@ -237,7 +219,6 @@ PAGE_HTML = r"""<!DOCTYPE html>
         .stat-val { font-size: 18px; font-weight: 700; color: var(--text-bright); }
         .stat-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-top: 1px; }
 
-        /* ── Side panel ── */
         #panel {
             position: fixed; top: 60px; right: 16px; bottom: 16px; z-index: 1000;
             width: 320px; background: var(--bg-panel);
@@ -246,7 +227,6 @@ PAGE_HTML = r"""<!DOCTYPE html>
             display: flex; flex-direction: column;
             box-shadow: 0 16px 64px rgba(0,0,0,0.6);
             overflow: hidden;
-            transition: transform 0.3s ease;
         }
         .panel-header { padding: 16px 18px 12px; border-bottom: 1px solid var(--border); }
         .panel-header h3 { font-size: 13px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; }
@@ -258,16 +238,13 @@ PAGE_HTML = r"""<!DOCTYPE html>
         select {
             width: 100%; padding: 9px 10px; background: var(--bg-deep); border: 1px solid var(--border);
             color: var(--text); border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 12px;
-            appearance: none; cursor: pointer; transition: border-color 0.2s;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%235a6e82'/%3E%3C/svg%3E");
-            background-repeat: no-repeat; background-position: right 10px center;
+            appearance: none; cursor: pointer;
         }
         select:focus { outline: none; border-color: var(--accent); }
 
         .btn {
             width: 100%; padding: 10px; border: none; border-radius: 8px; cursor: pointer;
-            font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600;
-            letter-spacing: 0.3px; transition: all 0.15s ease;
+            font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600; transition: all 0.15s ease;
         }
         .btn:active { transform: scale(0.97); }
         .btn-add { background: linear-gradient(135deg, #0ea5e9, #0369a1); color: white; margin-top: 14px; }
@@ -276,28 +253,23 @@ PAGE_HTML = r"""<!DOCTYPE html>
         .btn-clear:hover { border-color: var(--red); color: var(--red); }
 
         .train-queue { margin-top: 16px; }
-        .train-queue-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-dim); margin-bottom: 6px; }
+        .train-queue-title { font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--text-dim); margin-bottom: 6px; }
         .queue-item {
             display: flex; align-items: center; gap: 8px; padding: 8px 10px;
             background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
             margin-bottom: 4px; font-size: 11px; color: var(--text);
-            animation: fadeIn 0.3s ease;
         }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
         .queue-idx { font-weight: 700; color: var(--accent); min-width: 18px; }
         .queue-route { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .queue-status { font-size: 14px; }
         .queue-pct { font-size: 10px; color: var(--text-dim); min-width: 32px; text-align: right; }
 
-        /* ── Legend ── */
         .legend { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
         .legend-item { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--text-dim); }
         .legend-line { width: 24px; height: 3px; border-radius: 2px; }
 
-        /* ── Loading overlay ── */
         #loading {
-            position: fixed; inset: 0; z-index: 9999;
-            background: var(--bg-deep);
+            position: fixed; inset: 0; z-index: 9999; background: var(--bg-deep);
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             transition: opacity 0.6s ease;
         }
@@ -306,11 +278,13 @@ PAGE_HTML = r"""<!DOCTYPE html>
         @keyframes spin { to { transform: rotate(360deg); } }
         .loading-text { margin-top: 16px; font-size: 13px; color: var(--text-dim); }
         .loading-sub { margin-top: 4px; font-size: 11px; color: var(--text-dim); opacity: 0.5; }
-
-        /* ── Scrollbar ── */
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+        
+        /* Custom Google Maps Marker Label */
+        .gmap-marker-label {
+            font-size: 18px;
+            filter: drop-shadow(0 0 4px rgba(56,189,248,0.8));
+            transform: translateY(-50%);
+        }
     </style>
 </head>
 <body>
@@ -357,30 +331,59 @@ PAGE_HTML = r"""<!DOCTYPE html>
 
 <div id="map"></div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-// ── Map ──
-const map = L.map('map', { zoomControl: false }).setView([54.5, -3.5], 6);
-L.control.zoom({ position: 'bottomleft' }).addTo(map);
-L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ', maxZoom: 16
-}).addTo(map);
-
-let trackLayer = null;
-let activeLayer = null;
-let pathLayer = null;
+let map;
+let activePolylines = [];
+let pathPolylines = [];
 let trainMarkers = {};
 let pollTimer = null;
+
+// Initialize Google Map
+function initMap() {
+    // Premium dark mode style that preserves all station/city labels clearly
+    const darkStyle = [
+      { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
+      { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
+      { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
+      { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
+      { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
+      { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#263c3f" }] },
+      { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#6b9a76" }] },
+      { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] },
+      { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#212a37" }] },
+      { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#9ca5b3" }] },
+      { featureType: "transit", elementType: "geometry", stylers: [{ color: "#2f3948" }] },
+      { featureType: "transit.station", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
+      { featureType: "water", elementType: "geometry", stylers: [{ color: "#17263c" }] },
+      { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#515c6d" }] },
+      { featureType: "water", elementType: "labels.text.stroke", stylers: [{ color: "#17263c" }] },
+    ];
+
+    map = new google.maps.Map(document.getElementById('map'), {
+        center: { lat: 54.5, lng: -3.5 },
+        zoom: 6,
+        styles: darkStyle,
+        disableDefaultUI: true,
+        zoomControl: true
+    });
+
+    loadNetwork();
+    loadStations();
+}
 
 // ── Load Network ──
 async function loadNetwork() {
     try {
         const res = await fetch('api/network');
         const geojson = await res.json();
-        trackLayer = L.geoJSON(geojson, {
-            style: { color: '#1a2640', weight: 1.2, opacity: 0.8 },
-            interactive: false
-        }).addTo(map);
+        
+        map.data.addGeoJson(geojson);
+        map.data.setStyle({
+            strokeColor: '#64748b',
+            strokeWeight: 1.2,
+            strokeOpacity: 0.6
+        });
+        
         document.getElementById('s-segments').textContent = geojson.features.length.toLocaleString();
         document.getElementById('loading').classList.add('hidden');
     } catch(e) {
@@ -423,10 +426,16 @@ async function dispatchTrain() {
 async function clearAll() {
     await fetch('api/trains/clear', { method: 'POST' });
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-    if (activeLayer) { map.removeLayer(activeLayer); activeLayer = null; }
-    if (pathLayer) { map.removeLayer(pathLayer); pathLayer = null; }
-    Object.values(trainMarkers).forEach(m => map.removeLayer(m));
+    
+    activePolylines.forEach(p => p.setMap(null));
+    activePolylines = [];
+    
+    pathPolylines.forEach(p => p.setMap(null));
+    pathPolylines = [];
+    
+    Object.values(trainMarkers).forEach(m => m.setMap(null));
     trainMarkers = {};
+    
     document.getElementById('train-queue').innerHTML = '';
     document.getElementById('s-trains').textContent = '0';
     document.getElementById('s-arrived').textContent = '0';
@@ -443,26 +452,38 @@ async function pollState() {
         document.getElementById('s-trains').textContent = stats.active || 0;
         document.getElementById('s-arrived').textContent = stats.arrived || 0;
 
-        // Update active edge overlay
-        if (activeLayer) map.removeLayer(activeLayer);
+        // Clear previous overlays
+        activePolylines.forEach(p => p.setMap(null));
+        activePolylines = [];
+        pathPolylines.forEach(p => p.setMap(null));
+        pathPolylines = [];
+
+        // Active edges
         if (data.active_edges && data.active_edges.length > 0) {
-            const feats = data.active_edges.map(e => ({
-                type: 'Feature', geometry: { type: 'LineString', coordinates: e }
-            }));
-            activeLayer = L.geoJSON({ type: 'FeatureCollection', features: feats }, {
-                style: { color: '#f59e0b', weight: 3.5, opacity: 1 }, interactive: false
-            }).addTo(map);
+            data.active_edges.forEach(edge => {
+                const poly = new google.maps.Polyline({
+                    path: edge.map(c => ({ lat: c[1], lng: c[0] })),
+                    strokeColor: '#f59e0b',
+                    strokeWeight: 4,
+                    strokeOpacity: 1.0,
+                    map: map
+                });
+                activePolylines.push(poly);
+            });
         }
 
-        // Update train route paths
-        if (pathLayer) map.removeLayer(pathLayer);
+        // Paths
         if (data.train_paths && data.train_paths.length > 0) {
-            const feats = data.train_paths.map(coords => ({
-                type: 'Feature', geometry: { type: 'LineString', coordinates: coords }
-            }));
-            pathLayer = L.geoJSON({ type: 'FeatureCollection', features: feats }, {
-                style: { color: '#38bdf8', weight: 2, opacity: 0.5 }, interactive: false
-            }).addTo(map);
+            data.train_paths.forEach(coords => {
+                const poly = new google.maps.Polyline({
+                    path: coords.map(c => ({ lat: c[1], lng: c[0] })),
+                    strokeColor: '#0284c7',
+                    strokeWeight: 2.5,
+                    strokeOpacity: 0.8,
+                    map: map
+                });
+                pathPolylines.push(poly);
+            });
         }
 
         // Train markers
@@ -470,19 +491,21 @@ async function pollState() {
         let queueHtml = '';
         trains.forEach((t, idx) => {
             seen.add(t.id);
-            const ll = [t.lat, t.lon];
-            const icon = L.divIcon({
-                className: '',
-                html: `<div style="font-size:16px;filter:drop-shadow(0 0 4px rgba(56,189,248,0.6));">${t.status === 'ARRIVED' ? '✅' : '🚆'}</div>`,
-                iconSize: [20, 20],
-                iconAnchor: [10 + (idx % 4) * 5, 10 + Math.floor(idx / 4) * 5]
-            });
+            const pos = { lat: t.lat, lng: t.lon };
+            const iconStr = t.status === 'ARRIVED' ? '✅' : '🚆';
+            
             if (trainMarkers[t.id]) {
-                trainMarkers[t.id].setLatLng(ll).setIcon(icon);
+                trainMarkers[t.id].setPosition(pos);
+                trainMarkers[t.id].setLabel({ text: iconStr, className: 'gmap-marker-label' });
             } else {
-                trainMarkers[t.id] = L.marker(ll, { icon }).addTo(map);
+                trainMarkers[t.id] = new google.maps.Marker({
+                    position: pos,
+                    map: map,
+                    icon: { path: google.maps.SymbolPath.CIRCLE, scale: 0 },
+                    label: { text: iconStr, className: 'gmap-marker-label' },
+                    title: `T${idx} | Speed: ${t.speed_kmh} km/h | Progress: ${t.progress}%`
+                });
             }
-            trainMarkers[t.id].bindPopup(`<b>${t.id}</b><br>Speed: ${t.speed_kmh} km/h<br>Progress: ${t.progress}%`);
 
             const statusIcon = t.status === 'ARRIVED' ? '✅' : '🟢';
             queueHtml += `<div class="queue-item">
@@ -498,14 +521,13 @@ async function pollState() {
             : '';
 
         Object.keys(trainMarkers).forEach(id => {
-            if (!seen.has(id)) { map.removeLayer(trainMarkers[id]); delete trainMarkers[id]; }
+            if (!seen.has(id)) { trainMarkers[id].setMap(null); delete trainMarkers[id]; }
         });
     } catch(e) { /* ignore */ }
 }
 
-// ── Init ──
-loadNetwork();
-loadStations();
+// Ensure initMap is called when the script loads
+window.onload = initMap;
 </script>
 </body>
 </html>"""
