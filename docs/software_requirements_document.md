@@ -51,6 +51,7 @@ The project is divided into the following phases:
 | `torch` | (via SB3) | Neural network backend |
 | `google-cloud-storage` | ≥ 2.14.0 | GCS integration |
 | `osmium` | ≥ 3.7.0 | PBF streaming pre-filter |
+| `python-dotenv` | ≥ 1.0.0 | Environment variable loading |
 
 ### 2.3 System Dependencies (apt)
 | Package | Purpose |
@@ -160,7 +161,7 @@ The v2 model processes a 3-feature local radar for **one train at a time**. Beca
 ## 7. Interactive Simulation Dashboard
 
 ### 7.1 Server: `07_visualization_server.py`
-- **Framework:** FastAPI + Leaflet.js (Dark Mode).
+- **Framework:** FastAPI + Google Maps API (Light Mode).
 - **Root URL:** `http://127.0.0.1:8000/`
 
 ### 7.2 API Endpoints
@@ -188,7 +189,7 @@ The v2 model processes a 3-feature local radar for **one train at a time**. Beca
 ### 7.4 Frontend Features
 - **Station Dropdowns:** Populated from real UK station data.
 - **Train Queuing:** Add any number of trains with specific start/end stations.
-- **Live Map:** Leaflet markers move in real-time with emoji status indicators (🚆 en route, ✅ arrived).
+- **Live Map:** Google Maps markers move in real-time with emoji status indicators (🚆 en route, ✅ arrived).
 - **Stats Panel:** Live tick counter, active/blocked/arrived counts.
 - **Auto-Stop:** Frontend stops polling when all trains arrive.
 

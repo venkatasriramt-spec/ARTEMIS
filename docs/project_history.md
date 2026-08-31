@@ -216,9 +216,14 @@ This document records the chronological development of ARTEMIS, including all ma
 - Installed `build-essential` and `python3.10-dev` for C-extension compilation (`cykhash`, `pyrosm`).
 - All packages installed via `pip3 install --user` to `~/.local/`.
 
+### 2026-08-31 — UI Migration to Google Maps
+- **Migrated** the visualization server frontend (`07_visualization_server.py`) from Leaflet.js (Dark Mode) to Google Maps API (Light Mode/Silver style).
+- **Updated** map markers to use standard Google Maps markers.
+- **Added** `python-dotenv` support for loading the `GOOGLE_MAPS_API_KEY` environment variable.
+
 ---
 
-## Current Status (2026-08-29)
+## Current Status (2026-08-31)
 
 | Phase | Name | Status |
 |-------|------|--------|

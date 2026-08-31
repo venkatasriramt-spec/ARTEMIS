@@ -31,6 +31,9 @@ class RLSimController:
         self.last_rewards = None
         self.all_arrived = False
         
+        self.start_times = {}
+        self.stop_times = {}
+        
         self._lock = threading.Lock()
         self._pending_trains = []
         
@@ -52,6 +55,10 @@ class RLSimController:
         self.last_rewards = [0.0] * self.num_agents
         self.tick_count = 0
         self.all_arrived = False
+        
+        current_t = time.time()
+        self.start_times = {i: current_t for i in range(self.num_agents)}
+        self.stop_times = {}
         
         self.running = True
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
@@ -82,7 +89,13 @@ class RLSimController:
                 logger.info(f"Hot-added train #{self.env.num_agents - 1}")
         
         # Update controller state to match new agent count
+        old_num = self.num_agents
         self.num_agents = self.env.num_agents
+        
+        current_t = time.time()
+        for idx in range(old_num, self.num_agents):
+            self.start_times[idx] = current_t
+            
         self.last_rewards = list(self.last_rewards) + [0.0] * len(pending)
         # Rebuild obs to match new shape
         self.obs = self.env._get_obs()
@@ -106,7 +119,10 @@ class RLSimController:
             
             with self._lock:
                 self.tick_count += 1
-                
+                for i in range(num):
+                    if self.env.reached_destination[i] and i not in self.stop_times:
+                        self.stop_times[i] = time.time()
+                        
             if terminated:
                 logger.info("All trains have reached their destinations!")
                 self.all_arrived = True
@@ -142,6 +158,12 @@ class RLSimController:
                 # Approximate progress
                 progress = 100.0 if status == "ARRIVED" else (self.env.path_indices[i] / max(1, len(self.env.optimal_paths[i]))) * 100.0
                 
+                t_start = self.start_times.get(i, 0)
+                t_stop = self.stop_times.get(i, 0)
+                duration = (t_stop if t_stop > 0 else time.time()) - t_start
+                start_str = time.strftime('%H:%M:%S', time.localtime(t_start)) if t_start else "--"
+                stop_str = time.strftime('%H:%M:%S', time.localtime(t_stop)) if t_stop else "--"
+                
                 trains.append({
                     "id": f"RL_T{i}",
                     "lat": float(node_data['y']),
@@ -153,7 +175,10 @@ class RLSimController:
                     "distance_km": round(dist_to_go, 1),
                     "total_km": round(dist_to_go, 1), 
                     "speed_kmh": float(self.env.train_speeds[i]),
-                    "reward": float(self.last_rewards[i]) if i < len(self.last_rewards) else 0.0
+                    "reward": float(self.last_rewards[i]) if i < len(self.last_rewards) else 0.0,
+                    "start_time": start_str,
+                    "stop_time": stop_str,
+                    "duration_sec": int(duration)
                 })
                 
             stats = {
@@ -182,6 +207,11 @@ class RLSimController:
                     continue
                 idx = int(self.env.path_indices[i])
                 path = self.env.optimal_paths[i]
-                if idx < len(path) - 1:
-                    edges.append((path[idx], path[idx + 1]))
+                
+                # Grab a visible 'trail' of edges ahead of the train (next 100 nodes)
+                # This ensures the active track highlight is highly visible on the UI
+                trail_len = min(100, len(path) - idx - 1)
+                for j in range(trail_len):
+                    edges.append((path[idx + j], path[idx + j + 1]))
+                    
         return edges

@@ -19,6 +19,7 @@ ARTEMIS/
 │   ├── 04_upload_to_gcs.py
 │   ├── 05_build_network_graph.py
 │   ├── backup_graphs.py
+│   ├── download_from_gcs.py
 │   ├── overpass_fallback.py
 │   └── pipeline.py
 ├── core_engine/                        # Routing, Visualization & Simulation
@@ -111,6 +112,9 @@ python data_preparation/05_build_network_graph.py
 ### 4. Run the RL Simulation Dashboard (Phase 5)
 
 ```bash
+# Set your Google Maps API key (or add it to a .env file)
+export GOOGLE_MAPS_API_KEY="your_api_key_here"
+
 # Start the interactive web dashboard
 python core_engine/07_visualization_server.py
 # Access at http://127.0.0.1:8000/
@@ -159,7 +163,7 @@ Phase 1: Data Acquisition       Phase 2: Graph Build        Phase 3: Routing Eng
                                                        │ Phase 5: Interactive     │
                                                        │ Simulation Dashboard     │
                                                        │ 07_visualization_server  │
-                                                       │   FastAPI + Leaflet.js   │
+                                                       │   FastAPI + Google Maps  │
                                                        │   Station Selection UI   │
                                                        │   Real-time RL Sim       │
                                                        └──────────────────────────┘
@@ -221,7 +225,7 @@ Edit `config/countries.json` to:
 |----------|-------|-------------|
 | Tracks | `rail`, `narrow_gauge` | Long-distance/intercity railway lines |
 | Stations | `station`, `halt` | Stops and stations |
-| Infrastructure | `signal`, `switch`, `crossing` | Track infrastructure |
+| Infrastructure | `signal`, `switch`, `crossing`, `level_crossing` | Track infrastructure |
 | Service | `spur`, `siding`, `yard` | Service tracks |
 
 > **Note:** Subway, tram, light rail, and monorail are excluded — only intercity/interstate trains are extracted.

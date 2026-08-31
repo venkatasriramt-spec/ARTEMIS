@@ -104,7 +104,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train V2 Decentralized PPO Brain for ARTEMIS")
     parser.add_argument("--country", type=str, default="uk", help="Country code to train on")
     parser.add_argument("--steps", type=int, default=100000, help="Total timesteps to train")
-    parser.add_argument("--cores", type=int, default=16, help="Number of CPU cores to use for vectorized environments")
+    parser.add_argument("--cores", type=int, default=10, help="Number of CPU cores to use for vectorized environments")
     parser.add_argument("--agents", type=int, default=4, help="Number of trains in the simulation")
     args = parser.parse_args()
 

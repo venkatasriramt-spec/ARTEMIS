@@ -53,6 +53,7 @@ class ArtemisTrainEnv(gym.Env):
         self.train_speeds = np.zeros(self.num_agents, dtype=np.float32)
         self.optimal_paths = [[] for _ in range(self.num_agents)]
         self.path_indices = np.zeros(self.num_agents, dtype=int)
+        self.edge_progress = np.zeros(self.num_agents, dtype=np.float32)
         
         self.steps = 0
         self.max_steps = 20000 # Prevent infinite loops
@@ -106,6 +107,7 @@ class ArtemisTrainEnv(gym.Env):
 
         self.path_indices = np.zeros(self.num_agents, dtype=int)
         self.train_speeds = np.zeros(self.num_agents, dtype=np.float32)
+        self.edge_progress = np.zeros(self.num_agents, dtype=np.float32)
         self.reached_destination = np.zeros(self.num_agents, dtype=bool)
         self.steps = 0
         
@@ -141,11 +143,25 @@ class ArtemisTrainEnv(gym.Env):
                 self.train_speeds[i] = min(300.0, self.train_speeds[i] + 20.0)
                 
             if self.train_speeds[i] > 0 and self.path_indices[i] < len(self.optimal_paths[i]) - 1:
-                self.path_indices[i] += 1
-                self.current_nodes[i] = self.optimal_paths[i][self.path_indices[i]]
+                # 10 seconds per tick
+                dist_km = self.train_speeds[i] * (10.0 / 3600.0) 
+                self.edge_progress[i] += dist_km
                 
-            if self.current_nodes[i] == self.target_nodes[i]:
+                while self.path_indices[i] < len(self.optimal_paths[i]) - 1:
+                    curr_node = self.optimal_paths[i][self.path_indices[i]]
+                    next_node = self.optimal_paths[i][self.path_indices[i] + 1]
+                    edge_len = max(0.001, calc_dist(curr_node, next_node))
+                    
+                    if self.edge_progress[i] >= edge_len:
+                        self.edge_progress[i] -= edge_len
+                        self.path_indices[i] += 1
+                        self.current_nodes[i] = self.optimal_paths[i][self.path_indices[i]]
+                    else:
+                        break
+                        
+            if self.current_nodes[i] == self.target_nodes[i] or self.path_indices[i] >= len(self.optimal_paths[i]) - 1:
                 self.reached_destination[i] = True
+                self.current_nodes[i] = self.target_nodes[i]
                 self.train_speeds[i] = 0.0
 
         # Vectorized Rewards
@@ -156,9 +172,15 @@ class ArtemisTrainEnv(gym.Env):
             if self.reached_destination[i]:
                 continue
             for j in range(i+1, self.num_agents):
-                if not self.reached_destination[j] and self.current_nodes[i] == self.current_nodes[j]:
-                    rewards[i] -= 1000.0
-                    rewards[j] -= 1000.0
+                if not self.reached_destination[j]:
+                    dist = calc_dist(self.current_nodes[i], self.current_nodes[j])
+                    if dist < 0.5: # 500 meters collision radius
+                        rewards[i] -= 10000.0
+                        rewards[j] -= 10000.0
+                    elif dist < 2.0 and (self.train_speeds[i] > 50 or self.train_speeds[j] > 50):
+                        # Safe braking distance penalty
+                        rewards[i] -= 100.0
+                        rewards[j] -= 100.0
             
             # Progress reward and time penalty
             rewards[i] += 1.0 if self.train_speeds[i] > 0 else 0.0
@@ -263,6 +285,7 @@ class ArtemisTrainEnv(gym.Env):
         self.optimal_paths.append(path)
         self.path_indices = np.append(self.path_indices, 0)
         self.train_speeds = np.append(self.train_speeds, np.float32(0.0))
+        self.edge_progress = np.append(self.edge_progress, np.float32(0.0))
         self.reached_destination = np.append(self.reached_destination, False)
         
         return True

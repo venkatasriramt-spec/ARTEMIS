@@ -17,8 +17,9 @@ build/
 # --- Data (large, generated locally) ---
 data/
 
-# --- RL Training Logs (TensorBoard) ---
+# --- RL Training Logs & Models ---
 versions/*/logs/
+versions/*/models/*_steps.zip
 
 # --- Virtual Environments ---
 .env
