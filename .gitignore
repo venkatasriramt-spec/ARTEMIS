@@ -20,8 +20,12 @@ data/
 # --- RL Training Logs & Models ---
 versions/*/logs/
 versions/*/models/*_steps.zip
+# Exclude final model zips from git (contain pickle data which triggers AV false positives)
+# Commit the _weights/ directories instead
+versions/*/models/*_final.zip
 
-# --- Virtual Environments ---
+# --- Environment & Secrets ---
+# .env contains API keys — never commit this!
 .env
 .venv
 env/
