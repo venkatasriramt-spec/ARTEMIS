@@ -17,12 +17,12 @@ build/
 # --- Data (large, generated locally) ---
 data/
 
-# --- RL Training Logs & Models ---
+# --- RL Training Logs ---
 versions/*/logs/
-versions/*/models/*_steps.zip
-# Exclude final model zips from git (contain pickle data which triggers AV false positives)
-# Commit the _weights/ directories instead
-versions/*/models/*_final.zip
+
+# --- RL Model Zips (contain pickle data which may trigger AV false positives) ---
+# Commit the _weights/ directories instead (clean .pth files)
+versions/*/models/*.zip
 
 # --- Environment & Secrets ---
 # .env contains API keys — never commit this!

@@ -1,8 +1,8 @@
 # ARTEMIS Software Requirements Document (SRD)
 
 **Project Name:** ARTEMIS (Autonomous Railway Throughput & Management Intelligent System)  
-**Version:** 3.0  
-**Last Updated:** 2026-08-29  
+**Version:** 4.0  
+**Last Updated:** 2026-09-09  
 
 ---
 
@@ -30,9 +30,10 @@ The project is divided into the following phases:
 - **Local Development:** Ubuntu/Debian desktop with Python 3.10+.
   - Dependencies installed globally via `pip3 install --user`.
   - C++ compiler (`build-essential`) required for extensions like `cykhash` and `pyrosm`.
-- **Cloud (Optional):** GCP Virtual Desktop (Compute Engine instance with desktop environment).
+- **Cloud (Optional):** GCP Virtual Desktop (Compute Engine instance with XFCE + XRDP desktop environment).
   - Machine Type: Adjusted as needed (e.g., `n2d-highmem-16` for heavy workloads).
   - Boot Disk: 200 GB `PD_SSD`.
+  - Setup script: `infra/desktop_virtualization_setup.sh`.
 - **Storage (Cloud):** Google Cloud Storage bucket `gs://artemis-railway-data` in `us-central1`.
 
 ### 2.2 Dependencies
@@ -140,18 +141,26 @@ The project is divided into the following phases:
     - +100.0 for reaching the destination.
     - -1.0 time penalty per step.
     - -5.0 for exceeding the track speed limit.
-    - -1000.0 for collision (two trains on the same node).
+    - -100.0 safe braking distance penalty (within 2 km at speed > 50 km/h).
+    - -10,000.0 for collision (two trains within 0.5 km).
   - **Dynamic Station Injection:** `reset()` accepts optional `train_configs` with GPS coordinates, mapping them to nearest graph nodes via KD-Tree. Falls back to random stations if not provided.
+  - **Hot-Add Agents:** `add_agent()` dynamically injects new trains into a running simulation.
   - **Max Steps:** 20,000 (prevents premature truncation on long routes).
 
 - **Training:** `train_ppo_v2.py`
   - `FlattenMultiAgentVecEnv` wrapper treats each train as an independent single-agent env for SB3.
-  - Trained for **5,000,000 steps** on UK network with 4 agents.
-  - Checkpoints every 640k steps; final model: `ppo_artemis_uk_final.zip`.
+  - Trained on UK network with 4 concurrent agents.
+  - Checkpointed periodically; final model: `ppo_artemis_uk_final.zip`.
 
 - **Inference Controller:** `rl_sim_controller.py`
   - Background thread calls `model.predict(obs[i])` per train per tick.
-  - Auto-terminates via `os._exit(0)` when all trains arrive.
+  - Waits for more trains after all current trains arrive (no longer auto-terminates the server).
+  - Supports hot-adding trains to a running simulation via `add_trains()`.
+
+- **Weight Re-export:** `reexport_weights.py`
+  - Extracts clean `.pth` (PyTorch) weight files from SB3 `.zip` archives into `_weights/` directories.
+  - SB3 zips contain Python pickle data which triggers antivirus false positives on GitHub.
+  - The `_weights/` directories are committed instead; the `.zip` files are git-ignored.
 
 ### 6.3 Key Design Decision: Decentralized Scaling
 The v2 model processes a 3-feature local radar for **one train at a time**. Because the policy is shared and independent, the same model works with 1, 10, or 100 trains without retraining.
@@ -163,35 +172,36 @@ The v2 model processes a 3-feature local radar for **one train at a time**. Beca
 ### 7.1 Server: `07_visualization_server.py`
 - **Framework:** FastAPI + Google Maps API (Light Mode).
 - **Root URL:** `http://127.0.0.1:8000/`
+- **API Key:** Requires `GOOGLE_MAPS_API_KEY` environment variable (loaded via `python-dotenv` from `.env` file).
 
 ### 7.2 API Endpoints
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Serves the simulation dashboard HTML |
-| `/api/stations?country=uk` | GET | Returns named UK stations with GPS coords |
-| `/api/rl_sim/start` | POST | Starts simulation with dynamic train list |
-| `/api/rl_sim/stop` | POST | Stops the running simulation |
-| `/api/rl_sim/state` | GET | Returns real-time positions of all trains |
+| `/api/stations` | GET | Returns named UK stations with GPS coords |
+| `/api/network` | GET | Returns UK railway tracks as GeoJSON |
+| `/api/trains/add` | POST | Deploys trains (starts sim if not running, or hot-adds) |
+| `/api/trains/clear` | POST | Stops simulation and clears all trains |
+| `/api/trains/state` | GET | Returns real-time positions of all trains |
 
-### 7.3 Start Request Payload
+### 7.3 Deploy Trains Request Payload
 ```json
 {
-  "country": "uk",
   "trains": [
     {"start_lat": 51.53, "start_lon": -0.12, "end_lat": 55.95, "end_lon": -3.19},
     {"start_lat": 53.48, "start_lon": -2.24, "end_lat": 51.45, "end_lon": -2.58}
-  ],
-  "speed_kmh": 120.0,
-  "tick_seconds": 60
+  ]
 }
 ```
 
 ### 7.4 Frontend Features
 - **Station Dropdowns:** Populated from real UK station data.
-- **Train Queuing:** Add any number of trains with specific start/end stations.
+- **Train Deployment:** Deploy any number of trains with specific start/end stations. Simulation starts automatically on first deploy.
+- **Hot-Add:** Deploy additional trains into a running simulation without restarting.
 - **Live Map:** Google Maps markers move in real-time with emoji status indicators (🚆 en route, ✅ arrived).
-- **Stats Panel:** Live tick counter, active/blocked/arrived counts.
-- **Auto-Stop:** Frontend stops polling when all trains arrive.
+- **Network Overlay:** Full UK railway network rendered as GeoJSON with active track highlighting.
+- **Stats Panel:** Live active/arrived train counts.
+- **Clear All:** Button to stop simulation and clear all trains.
 
 ---
 
@@ -201,3 +211,4 @@ The v2 model processes a 3-feature local radar for **one train at a time**. Beca
 - **Persistence:** All outputs backed up to GCS.
 - **Portability:** All scripts use relative paths. Configuration centralized in `config/countries.json`.
 - **No Virtual Environment:** Dependencies installed globally for simplicity.
+- **AV-Safe Distribution:** Model weights are re-exported as clean `.pth` files to avoid antivirus false positives on GitHub.

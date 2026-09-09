@@ -32,18 +32,23 @@ ARTEMIS/
 │   │   │   ├── train_env.py
 │   │   │   └── train_ppo.py
 │   │   └── models/
-│   │       └── ppo_artemis_uk_final.zip
+│   │       ├── ppo_artemis_uk_final.zip
+│   │       └── ppo_artemis_uk_weights/   # Clean .pth weights for GitHub
 │   └── v2/                             # RL v2: Decentralized Shared-Radar PPO (Active)
 │       ├── scripts/
 │       │   ├── train_env_v2.py         # Gymnasium env with dynamic station injection
 │       │   ├── train_ppo_v2.py         # Training script with FlattenMultiAgentVecEnv
-│       │   └── rl_sim_controller.py    # Real-time simulation bridge for the dashboard
+│       │   ├── rl_sim_controller.py    # Real-time simulation bridge for the dashboard
+│       │   └── reexport_weights.py     # Extracts clean .pth files from SB3 zips
 │       ├── models/
-│       │   ├── ppo_artemis_uk_final.zip        # Final model (5M steps)
-│       │   └── ppo_artemis_uk_*_steps.zip      # Checkpoints (640k–4.48M steps)
+│       │   ├── ppo_artemis_uk_final.zip
+│       │   └── ppo_artemis_uk_weights/   # Clean .pth weights for GitHub
 │       └── logs/
 │           └── ppo_artemis_tensorboard/
 ├── infra/                              # GCP provisioning scripts
+│   ├── gcs_setup.sh                    # GCS bucket provisioning
+│   ├── vm_setup.sh                     # Compute Engine VM provisioning
+│   └── desktop_virtualization_setup.sh # XFCE + XRDP desktop setup
 ├── data/                               # Generated data (not committed)
 ├── docs/
 │   ├── project_history.md              # Full chronological dev log
@@ -123,18 +128,25 @@ python core_engine/07_visualization_server.py
 **Using the Dashboard:**
 1. Wait for the station list to load (hundreds of real UK stations).
 2. Select a **Start Station** and **End Station** from the dropdowns.
-3. Click **Add Train** to queue the route. Repeat for as many trains as you want.
-4. Click **Start Simulation** to watch the RL agent navigate all trains in real-time on the map.
-5. The simulation terminates automatically when all trains arrive at their destinations.
+3. Click **Deploy Train** to queue the route. Repeat for as many trains as you want. The simulation starts automatically when the first train is deployed.
+4. You can continue deploying new trains into a running simulation.
+5. Watch the RL agent navigate all trains in real-time on the map.
 
 ### 5. Train a New RL Model (Optional)
 
 ```bash
-# Train a PPO model on the UK network for 5M steps
-python versions/v2/scripts/train_ppo_v2.py --country uk --steps 5000000
+# Train a PPO model on the UK network
+python versions/v2/scripts/train_ppo_v2.py --country uk
 ```
 
-### 6. Backup Generated Graphs to GCS
+### 6. Re-export Weights for Distribution
+
+```bash
+# Extract clean .pth files from SB3 .zip files to avoid AV false positives
+python versions/v2/scripts/reexport_weights.py
+```
+
+### 7. Backup Generated Graphs to GCS
 
 ```bash
 python data_preparation/backup_graphs.py
@@ -156,7 +168,7 @@ Phase 1: Data Acquisition       Phase 2: Graph Build        Phase 3: Routing Eng
 │ 03_convert_to_kml.py   │                             │ Phase 4: RL Training     │
 │   GeoJSON → Styled KML │                             │ v1: Centralized PPO      │
 │                        │                             │ v2: Decentralized Radar  │
-│ 04_upload_to_gcs.py    │                             │   (5M steps, UK)         │
+│ 04_upload_to_gcs.py    │                             │   (Shared Policy)        │
 │   All files → GCS      │                             └──────────────────────────┘
 └────────────────────────┘                                         ↓
                                                        ┌──────────────────────────┐
@@ -183,7 +195,7 @@ Phase 1: Data Acquisition       Phase 2: Graph Build        Phase 3: Routing Eng
 - **Action Space:** `Discrete(3)` — Brake / Maintain / Accelerate.
 - **Key Innovation:** A custom `FlattenMultiAgentVecEnv` wrapper "unwraps" the multi-agent environment so SB3 sees each train as an independent single-agent env. This trains a **single shared policy** that is applied to every train independently.
 - **Scaling:** Because each train uses the same 3-feature radar, the model works with **any number of trains** at inference time without retraining.
-- **Trained:** 5,000,000 steps on the UK railway network with 4 agents, checkpointed every 640k steps.
+- **Distribution:** To avoid antivirus false positives on GitHub caused by the Python pickle data inside Stable-Baselines3 `.zip` files, we use `reexport_weights.py` to extract and distribute clean `.pth` weights in the `_weights/` directories.
 
 ---
 
@@ -191,7 +203,13 @@ Phase 1: Data Acquisition       Phase 2: Graph Build        Phase 3: Routing Eng
 
 ### Desktop Virtualization
 
-ARTEMIS was developed on a **GCP Virtual Desktop** (Chrome Remote Desktop / RDP on a Compute Engine instance). The underlying CPU instance type was changed as needed depending on the workload — scaled up for heavy graph processing and RL training, and scaled down during lighter development work.
+ARTEMIS was developed on a **GCP Virtual Desktop** (XFCE + XRDP on a Compute Engine instance). The underlying CPU instance type was changed as needed depending on the workload — scaled up for heavy graph processing and RL training, and scaled down during lighter development work.
+
+```bash
+# Provision a full XFCE virtual desktop with Python & geospatial dependencies
+chmod +x infra/desktop_virtualization_setup.sh
+./infra/desktop_virtualization_setup.sh
+```
 
 | Setting | Value | Rationale |
 |---------|-------|-----------|
@@ -254,11 +272,12 @@ Edit `config/countries.json` to:
 
 ## ⚠️ Important Notes
 
-1. **Overpass API limitations**: The Overpass API will timeout for large countries (US, Russia, China). Always use the Geofabrik pipeline for these.
-2. **Disk space**: Full pipeline needs ~200 GB for all 14 countries' PBF files.
-3. **Memory Optimization**: The pipeline uses `osmium-tool` for pre-filtering and a custom streaming KML writer, keeping RAM usage extremely low even for massive datasets (like the 10 GB US `.pbf`).
-4. **C++ Compiler Required**: `build-essential` and `python3.10-dev` are required for compiling C extensions (`cykhash`, `pyrosm`).
-5. **Global Python:** Dependencies are installed globally via `pip3 install --user`. No virtual environment is used.
+1. **Google Maps API Key:** The dashboard requires a valid `GOOGLE_MAPS_API_KEY` in your `.env` file to render the map tiles.
+2. **Overpass API limitations**: The Overpass API will timeout for large countries (US, Russia, China). Always use the Geofabrik pipeline for these.
+3. **Disk space**: Full pipeline needs ~200 GB for all 14 countries' PBF files.
+4. **Memory Optimization**: The pipeline uses `osmium-tool` for pre-filtering and a custom streaming KML writer, keeping RAM usage extremely low even for massive datasets (like the 10 GB US `.pbf`).
+5. **C++ Compiler Required**: `build-essential` and `python3.10-dev` are required for compiling C extensions (`cykhash`, `pyrosm`).
+6. **Global Python:** Dependencies are installed globally via `pip3 install --user`. No virtual environment is used.
 
 ---
 

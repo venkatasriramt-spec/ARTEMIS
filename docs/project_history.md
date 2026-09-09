@@ -7,7 +7,7 @@ This document records the chronological development of ARTEMIS, including all ma
 ## Phase 1: Data Acquisition & Pre-processing
 
 ### 2026-08-18 — Project Inception & Infrastructure Setup
-- **Created** initial project structure: `config/`, `scripts/`, `infra/`, `docs/`, `data/`.
+- **Created** initial project structure: `config/`, `data_preparation/`, `core_engine/`, `infra/`, `docs/`, `data/`.
 - **Defined** the 14 target countries in `config/countries.json` with Geofabrik download URLs, OSM relation IDs, and Overpass area IDs.
 - **Created** `infra/gcs_setup.sh` to provision the GCS bucket `gs://artemis-railway-data` in `us-central1` with Uniform Bucket-Level Access and lifecycle rules for cost optimization.
 - **Created** `infra/vm_setup.sh` to provision a GCP Compute Engine instance for desktop virtualization.
@@ -15,15 +15,15 @@ This document records the chronological development of ARTEMIS, including all ma
   - Startup script auto-installs: `gdal-bin`, `libgdal-dev`, `osmium-tool`, `pyrosm`, `geopandas`, `shapely`, `simplekml`, `fastkml`, `networkx`.
 
 ### 2026-08-18 — Pipeline Scripts Development
-- **Wrote** `scripts/01_download_pbf.py` — Multi-threaded Geofabrik PBF downloader with MD5 verification and resume support.
-- **Wrote** `scripts/02_extract_railway.py` — Two-stage extraction:
+- **Wrote** `data_preparation/01_download_pbf.py` — Multi-threaded Geofabrik PBF downloader with MD5 verification and resume support.
+- **Wrote** `data_preparation/02_extract_railway.py` — Two-stage extraction:
   1. `osmium` streaming pre-filter (C++ binary, zero-memory) to strip non-railway data.
   2. `pyrosm` parsing of filtered PBF into GeoPandas DataFrames.
   - **Key Decision:** Capped `pyrosm` parallelism at 4 workers (vs. 16 for I/O tasks) to prevent OOM on large datasets (US: 10 GB PBF).
-- **Wrote** `scripts/03_convert_to_kml.py` — Custom Streaming XML Generator that writes KML directly to disk line-by-line, bypassing the `simplekml` DOM builder which crashed on large datasets.
-- **Wrote** `scripts/04_upload_to_gcs.py` — Concurrent upload to GCS bucket with proper directory structure.
-- **Wrote** `scripts/pipeline.py` — Master orchestrator supporting `--countries`, `--steps`, and `--overpass` flags.
-- **Wrote** `scripts/overpass_fallback.py` — Overpass API client for small countries or targeted queries.
+- **Wrote** `data_preparation/03_convert_to_kml.py` — Custom Streaming XML Generator that writes KML directly to disk line-by-line, bypassing the `simplekml` DOM builder which crashed on large datasets.
+- **Wrote** `data_preparation/04_upload_to_gcs.py` — Concurrent upload to GCS bucket with proper directory structure.
+- **Wrote** `data_preparation/pipeline.py` — Master orchestrator supporting `--countries`, `--steps`, and `--overpass` flags.
+- **Wrote** `data_preparation/overpass_fallback.py` — Overpass API client for small countries or targeted queries.
 
 ### 2026-08-18 — Phase 1 Execution & Verification
 - Successfully extracted railway data for all 14 countries.
@@ -43,7 +43,7 @@ This document records the chronological development of ARTEMIS, including all ma
 - **Resolution:** Reduced boot disk to 200 GB. Updated `vm_setup.sh`.
 
 ### 2026-08-20 — Graph Builder Development
-- **Wrote** `scripts/05_build_network_graph.py`.
+- **Wrote** `data_preparation/05_build_network_graph.py`.
 - **Architecture:** Reads GeoJSON tracks from local disk (auto-downloaded from GCS), iterates over geometries using fast `itertuples()`, creates NetworkX DiGraph nodes/edges, exports as `.graphml`.
 - **Parallelism:** `ProcessPoolExecutor` with `os.cpu_count()` workers (16).
 
@@ -61,7 +61,7 @@ This document records the chronological development of ARTEMIS, including all ma
 ## Phase 3: Spatial Indexing, Routing & Visualization
 
 ### 2026-08-20 — Routing Engine Development
-- **Wrote** `scripts/06_spatial_routing.py` with the `RailwayRouter` class.
+- **Wrote** `core_engine/06_spatial_routing.py` with the `RailwayRouter` class.
 - **Architecture:**
   1. Load GraphML.
   2. Extract Largest Strongly Connected Component.
@@ -92,7 +92,7 @@ This document records the chronological development of ARTEMIS, including all ma
 - **London → Edinburgh:** 6,722 nodes, 637.23 km. The real East Coast Main Line is ~632 km. ✅
 
 ### 2026-08-20 — Visualization Server Development
-- **Wrote** `scripts/07_visualization_server.py` using FastAPI + Leaflet.js.
+- **Wrote** `core_engine/07_visualization_server.py` using FastAPI + Leaflet.js.
 - Initially hardcoded 5 countries for testing.
 - **Added** `fastapi>=0.100.0` and `uvicorn>=0.23.0` to `infra/vm_setup.sh`.
 
@@ -126,7 +126,7 @@ This document records the chronological development of ARTEMIS, including all ma
 - **Fix:** Changed `async def get_stations` to `def get_stations`. Added in-memory caching (`station_cache` dict) so subsequent requests for the same country return instantly.
 
 ### 2026-08-20 — GCS Backup Script
-- **Wrote** `scripts/backup_graphs.py` to upload all `.graphml` files to `gs://artemis-railway-data/processed/graph/[country]/`.
+- **Wrote** `data_preparation/backup_graphs.py` to upload all `.graphml` files to `gs://artemis-railway-data/processed/graph/[country]/`.
 
 ### 2026-08-20 — Documentation Update
 - Updated `README.md` to reflect all three completed phases, new scripts, updated VM specifications, and full pipeline architecture.
@@ -138,7 +138,7 @@ This document records the chronological development of ARTEMIS, including all ma
 ## Phase 4: Multi-Agent Train Simulation (Legacy)
 
 ### 2026-08-20 — Simulation Engine Development (Discrete-Event)
-- **Wrote** `scripts/08_simulation_engine.py`.
+- **Wrote** `core_engine/08_simulation_engine.py`.
 - **Architecture:**
   - `TrainAgent`: Dataclass tracking train status, speed (km/h), route progress, and blocked ticks.
   - `RailwaySimulation`: Discrete-event engine (tick-based) that advances trains along their pre-computed A* routes.
@@ -146,7 +146,7 @@ This document records the chronological development of ARTEMIS, including all ma
 - **Added** a headless CLI test harness to spawn `N` trains at random stations and run `M` simulation ticks, printing stats every 50 ticks.
 
 ### 2026-08-20 — Live Simulation Dashboard (Legacy)
-- **Updated** `scripts/07_visualization_server.py`.
+- **Updated** `core_engine/07_visualization_server.py`.
 - Added `/api/sim/*` endpoints for the discrete-event simulation.
 - Added a Dark Mode Leaflet dashboard at `/simulation`.
 
@@ -174,31 +174,43 @@ This document records the chronological development of ARTEMIS, including all ma
   - **Observation per train:** `Box(shape=(3,))` — `[current_speed, edge_speed_limit, dist_to_nearest_train]`.
   - **Action per train:** `Discrete(3)` — Brake / Maintain / Accelerate.
   - Each train only sees its own local radar, not the global state.
+  - **Reward Function:**
+    - +1.0 for making progress (speed > 0).
+    - +100.0 for reaching the destination.
+    - -1.0 time penalty per step.
+    - -5.0 for exceeding the track speed limit.
+    - -100.0 safe braking distance penalty (within 2 km at speed > 50 km/h).
+    - -10,000.0 for collision (two trains within 0.5 km).
+  - **Dynamic Station Injection:** `reset()` accepts optional `train_configs` with GPS coordinates.
+  - **Hot-Add Agents:** `add_agent()` dynamically injects new trains into a running simulation.
 - **Created** `versions/v2/scripts/train_ppo_v2.py` — Training script with `FlattenMultiAgentVecEnv`.
   - **Key Innovation:** A custom `VecEnv` wrapper "unwraps" the multi-agent environment so Stable-Baselines3 sees each train as an independent single-agent environment. This trains a **single shared policy** that is applied to every train independently at inference time.
   - Supports `SubprocVecEnv` for parallel rollout across multiple CPU cores.
-- **Trained** on UK railway network for **5,000,000 steps** with 4 concurrent agents.
-  - Checkpoints saved every 640k steps to `versions/v2/models/`.
+- **Trained** on UK railway network with 4 concurrent agents.
   - Final model: `ppo_artemis_uk_final.zip`.
 
 ### 2026-08-29 — RL Simulation Controller
 - **Created** `versions/v2/scripts/rl_sim_controller.py`.
   - Bridges the pretrained PPO model with the visualization server.
   - Runs the RL environment in a background thread, calling `model.predict()` per-train per-tick.
-  - Exposes `get_state()` for real-time frontend polling.
-  - **Auto-Termination:** Calls `os._exit(0)` when all trains arrive or when `max_steps` is exceeded.
+  - Exposes `get_state()` and `get_active_edges()` for real-time frontend polling.
+  - **Hot-Add Trains:** Supports `add_trains()` to inject new trains into a running simulation.
+  - **Idle Wait:** When all trains arrive, the controller waits for new trains to be added instead of terminating the server.
 
 ### 2026-08-29 — Interactive Train Dispatcher UI
 - **Rewrote** `core_engine/07_visualization_server.py` as a standalone RL simulation server.
   - **Removed** legacy routing UI (`serve_ui()`, `/api/route`, inter-country routing).
   - **Removed** legacy discrete-event simulation endpoints (`/api/sim/*`).
-  - **Added** `/api/stations?country=uk` — Fetches real UK railway stations for the dropdowns.
-  - **Added** `POST /api/rl_sim/start` — Accepts a dynamic list of `{start_lat, start_lon, end_lat, end_lon}` train configurations.
+  - **Added** `GET /api/stations` — Fetches real UK railway stations for the dropdowns.
+  - **Added** `GET /api/network` — Returns UK railway tracks as GeoJSON for map rendering.
+  - **Added** `POST /api/trains/add` — Deploys trains (starts sim if not running, or hot-adds to running sim).
+  - **Added** `POST /api/trains/clear` — Stops simulation and clears all trains.
+  - **Added** `GET /api/trains/state` — Returns real-time positions of all trains.
   - **Added** "Train Dispatcher" panel to the frontend:
-    - Two searchable station dropdowns (Start/End).
-    - "Add Train" button to queue routes.
-    - "Start Simulation" button to launch all queued trains.
-    - Any number of trains can be added.
+    - Two searchable station dropdowns (Origin/Destination).
+    - "Deploy Train" button to add a route and start the simulation.
+    - "Clear All Trains" button to reset.
+    - Any number of trains can be deployed, including during a running simulation.
   - Dashboard served at root URL (`/`).
 
 ### 2026-08-29 — Dynamic Station Injection
@@ -221,9 +233,24 @@ This document records the chronological development of ARTEMIS, including all ma
 - **Updated** map markers to use standard Google Maps markers.
 - **Added** `python-dotenv` support for loading the `GOOGLE_MAPS_API_KEY` environment variable.
 
+### 2026-09-09 — Desktop Virtualization Setup Script
+- **Created** `infra/desktop_virtualization_setup.sh` — Standalone script to provision a headless Ubuntu server into a full XFCE + XRDP virtual desktop.
+  - Installs XFCE desktop, XRDP for remote access, Python 3.10+, Google Chrome, Antigravity IDE, and all ARTEMIS geospatial dependencies.
+  - Targets Ubuntu 22.04 LTS on GCP `e2-standard-4` or higher.
+
+### 2026-09-09 — Model Weight Re-export for GitHub
+- **Created** `versions/v2/scripts/reexport_weights.py`.
+  - Extracts clean `.pth` (PyTorch) weight files from SB3 `.zip` archives.
+  - SB3 `.zip` files contain Python pickle data (`data` blob) which triggers antivirus false positives (e.g., GitHub, Windows Defender).
+  - The `_weights/` directories contain only safe `.pth` files and are committed to GitHub instead.
+  - Also re-exports v1 model weights if available.
+- **Created** `versions/v1/models/ppo_artemis_uk_weights/` — Clean v1 policy weights.
+- **Created** `versions/v2/models/ppo_artemis_uk_weights/` — Clean v2 policy weights.
+- **Updated** `.gitignore` to exclude all `.zip` model files and commit only the `_weights/` directories.
+
 ---
 
-## Current Status (2026-08-31)
+## Current Status (2026-09-09)
 
 | Phase | Name | Status |
 |-------|------|--------|
@@ -236,6 +263,8 @@ This document records the chronological development of ARTEMIS, including all ma
 | **Dashboard** | Interactive Train Dispatcher | ✅ Complete |
 
 ### Active Architecture
-- The **visualization server** (`07_visualization_server.py`) now serves exclusively as an RL simulation dashboard at `http://127.0.0.1:8000/`.
-- Users select specific UK stations, queue any number of trains, and watch the RL agent route them in real-time.
+- The **visualization server** (`07_visualization_server.py`) serves as an RL simulation dashboard at `http://127.0.0.1:8000/`.
+- Users select specific UK stations, deploy any number of trains, and watch the RL agent route them in real-time.
+- Trains can be hot-added to a running simulation.
 - The pretrained v2 PPO model processes each train's local radar independently, enabling **arbitrary scaling** without retraining.
+- Model weights are distributed as clean `.pth` files to avoid antivirus false positives.
