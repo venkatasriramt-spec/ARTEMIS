@@ -248,9 +248,22 @@ This document records the chronological development of ARTEMIS, including all ma
 - **Created** `versions/v2/models/ppo_artemis_uk_weights/` — Clean v2 policy weights.
 - **Updated** `.gitignore` to exclude all `.zip` model files and commit only the `_weights/` directories.
 
+### 2026-10-07 — Station Registry Script & Visualization Server Update
+- **Created** `data_preparation/05b_build_station_registry.py` — Builds a `stations.json` registry from GeoJSON station data.
+  - Snaps stations to railway graph nodes via `RailwayRouter.find_nearest_node()`.
+  - Computes platform counts from graph degree + jitter.
+  - Output: `data/processed/geojson/{country}/stations.json` — dict keyed by node ID, each entry containing station name, coordinates, and platform_count.
+- **Updated** `core_engine/07_visualization_server.py` — `/api/stations` endpoint now reads from `stations.json` registry instead of parsing `[country]_stations.geojson` directly. Frontend now displays platform counts in station dropdowns and sidebar.
+- **Updated** `README.md` — Added `05b_build_station_registry.py` to project structure; updated `/api/stations` description to reflect registry-based station loading.
+- **Updated** `docs/software_requirements_document.md` — Added subsection documenting the station registry script.
+- **Updated** `data_preparation/02_extract_railway.py` — Bypassed the `osmium` pre-filtering step entirely because the VM was upgraded to 96GB RAM, allowing raw `.osm.pbf` files to be processed directly into memory. Added `platform` and `public_transport` to `KEEP_COLUMNS`.
+
+### 2026-10-07 — .gitignore Review
+- Reviewed `.gitignore` for GitHub commit readiness. Properly excludes generated data, model zips, environment files, and IDE artifacts while allowing source code and clean weight files to be committed.
+
 ---
 
-## Current Status (2026-09-09)
+## Current Status (2026-10-07)
 
 | Phase | Name | Status |
 |-------|------|--------|

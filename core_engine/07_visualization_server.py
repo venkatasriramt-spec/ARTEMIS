@@ -54,28 +54,18 @@ def get_stations():
     if station_cache is not None:
         return station_cache
 
-    geojson_path = base_dir / "data" / "processed" / "geojson" / "uk" / "uk_stations.geojson"
-    if not geojson_path.exists():
-        return []
-    
-    gdf = gpd.read_file(geojson_path)
-    stations = []
-    name_col = None
-    for c in ['name', 'tags.name', 'Name', 'NAME']:
-        if c in gdf.columns:
-            name_col = c
-            break
-    
-    if name_col:
-        named = gdf[gdf[name_col].notna() & (gdf[name_col] != '')].sort_values(name_col)
-        for _, row in named.iterrows():
-            if row.geometry and row.geometry.geom_type == 'Point':
-                stations.append({"name": str(row[name_col]), "lon": row.geometry.x, "lat": row.geometry.y})
+    registry_path = base_dir / "data" / "processed" / "geojson" / "uk" / "stations.json"
+    if registry_path.exists():
+        import json
+        with open(registry_path, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+        
+        # Convert dict to sorted list of stations
+        stations = sorted(list(registry.values()), key=lambda x: x.get("name", ""))
     else:
-        for idx, row in gdf.iterrows():
-            if row.geometry and row.geometry.geom_type == 'Point':
-                stations.append({"name": f"Station #{idx}", "lon": row.geometry.x, "lat": row.geometry.y})
-    
+        # Fallback to empty if registry hasn't been built yet
+        stations = []
+        
     station_cache = stations
     return stations
 
@@ -460,7 +450,8 @@ async function loadStations() {
         const stations = await res.json();
         let html = '<option value="">Choose station…</option>';
         stations.forEach(s => { 
-            html += `<option value="${s.lat},${s.lon}">${s.name}</option>`; 
+            const platCount = s.platform_count !== null ? s.platform_count : '?';
+            html += `<option value="${s.lat},${s.lon}">${s.name} (Platforms: ${platCount})</option>`; 
         });
         document.getElementById('sel-start').innerHTML = html;
         document.getElementById('sel-end').innerHTML = html;
@@ -472,7 +463,8 @@ function showStationSidebar(stn) {
     activeStation = stn;
     document.getElementById('station-panel').style.display = 'block';
     document.getElementById('sp-name').textContent = stn.name;
-    document.getElementById('sp-coords').textContent = `${stn.lat.toFixed(4)}, ${stn.lon.toFixed(4)}`;
+    document.getElementById('sp-coords').textContent = `${stn.lat.toFixed(4)}, ${stn.lon.toFixed(4)} | Platforms: ${stn.platform_count !== null ? stn.platform_count : '?'}`;
+
 }
 
 function setStation(type) {

@@ -47,6 +47,7 @@ KEEP_COLUMNS = [
     "operator", "gauge", "electrified", "maxspeed",
     "usage", "service", "tracks", "bridge", "tunnel",
     "ref", "network", "wikipedia", "wikidata",
+    "platform", "public_transport",
 ]
 
 
@@ -112,6 +113,7 @@ def extract_railway_data(
             keep_nodes=True,
             keep_ways=True,
             keep_relations=True,
+            extra_attributes=[c for c in KEEP_COLUMNS if c not in ["geometry", "id", "osm_type", "railway"]]
         )
 
         if gdf is None or gdf.empty:
@@ -282,22 +284,13 @@ def extract_country(
         result["error"] = f"PBF file not found in {pbf_dir / country_code}"
         return result
 
-    # Pre-filter with Osmium to avoid OOM in pyrosm
-    filtered_pbf = pbf_dir / f"{country_code}_filtered_temp.osm.pbf"
-    if not prefilter_with_osmium(pbf_path, filtered_pbf):
-        result["status"] = "failed"
-        result["error"] = "Osmium pre-filtering failed"
-        return result
+    # Pre-filter with Osmium bypassed (we have 96GB RAM, raw extraction is fine)
+    filtered_pbf = pbf_path
 
     # Extract railway data from the tiny filtered file
     gdf = extract_railway_data(filtered_pbf, railway_types)
     
-    # Clean up the temporary file
-    if filtered_pbf.exists():
-        try:
-            filtered_pbf.unlink()
-        except OSError:
-            pass
+    # Removed cleanup to prevent deleting the raw PBF
 
     if gdf is None or gdf.empty:
         result["status"] = "no_data"

@@ -18,6 +18,7 @@ ARTEMIS/
 │   ├── 03_convert_to_kml.py
 │   ├── 04_upload_to_gcs.py
 │   ├── 05_build_network_graph.py
+│   ├── 05b_build_station_registry.py    # Build stations.json registry from GeoJSON
 │   ├── backup_graphs.py
 │   ├── download_from_gcs.py
 │   ├── overpass_fallback.py
@@ -163,7 +164,7 @@ Phase 1: Data Acquisition       Phase 2: Graph Build        Phase 3: Routing Eng
 │   Geofabrik → .osm.pbf │ → │   graph.py           │ → │   KD-Tree + A*           │
 │                        │   │   GeoJSON → GraphML  │   │   Pathfinding            │
 │ 02_extract_railway.py  │   │   ProcessPoolExec    │   └──────────────────────────┘
-│   osmium → pyrosm      │   │   (16 cores)         │              ↓
+│   pyrosm (direct)      │   │   (16 cores)         │              ↓
 │                        │   └─────────────────────┘   ┌──────────────────────────┐
 │ 03_convert_to_kml.py   │                             │ Phase 4: RL Training     │
 │   GeoJSON → Styled KML │                             │ v1: Centralized PPO      │
@@ -263,7 +264,7 @@ Edit `config/countries.json` to:
 - **Haversine Distance:** All edge weights and the A* heuristic use the Haversine formula for accurate great-circle distance on the Earth's surface.
 
 ### Phase 5: RL Simulation Dashboard
-- **Interactive Station Selection:** The `/api/stations` endpoint parses `[country]_stations.geojson` and serves named stations as searchable dropdowns. Results are cached in-memory.
+- **Interactive Station Selection:** The `/api/stations` endpoint serves named stations as searchable dropdowns from the pre-built `stations.json` registry (produced by `05b_build_station_registry.py`). Each station entry includes its platform count. Results are cached in-memory.
 - **Dynamic Train Spawning:** Users queue any number of trains with specific start/end stations. The `ArtemisTrainEnv` snaps coordinates to nearest graph nodes using the KD-Tree and computes A* paths.
 - **Auto-Termination:** The simulation server terminates automatically when all trains reach their destinations.
 - **Decentralized Inference:** The PPO model is called per-train per-tick with each train's local radar observation, producing independent speed decisions.
@@ -275,7 +276,7 @@ Edit `config/countries.json` to:
 1. **Google Maps API Key:** The dashboard requires a valid `GOOGLE_MAPS_API_KEY` in your `.env` file to render the map tiles.
 2. **Overpass API limitations**: The Overpass API will timeout for large countries (US, Russia, China). Always use the Geofabrik pipeline for these.
 3. **Disk space**: Full pipeline needs ~200 GB for all 14 countries' PBF files.
-4. **Memory Optimization**: The pipeline uses `osmium-tool` for pre-filtering and a custom streaming KML writer, keeping RAM usage extremely low even for massive datasets (like the 10 GB US `.pbf`).
+4. **Memory Optimization**: The pipeline uses a custom streaming KML writer. (Note: The `osmium-tool` pre-filtering step was previously used to keep RAM usage low, but has been bypassed since upgrading the VM to 96GB RAM, allowing direct raw extraction).
 5. **C++ Compiler Required**: `build-essential` and `python3.10-dev` are required for compiling C extensions (`cykhash`, `pyrosm`).
 6. **Global Python:** Dependencies are installed globally via `pip3 install --user`. No virtual environment is used.
 

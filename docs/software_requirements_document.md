@@ -1,8 +1,8 @@
 # ARTEMIS Software Requirements Document (SRD)
 
 **Project Name:** ARTEMIS (Autonomous Railway Throughput & Management Intelligent System)  
-**Version:** 4.0  
-**Last Updated:** 2026-09-09  
+**Version:** 4.1  
+**Last Updated:** 2026-10-07  
 
 ---
 
@@ -67,14 +67,13 @@ The project is divided into the following phases:
 ### 3.1 Pipeline Steps
 1. **Download (`01_download_pbf.py`)**: Concurrently fetches `.osm.pbf` files for 14 countries from Geofabrik using multi-threading.
 2. **Extract (`02_extract_railway.py`)**:
-   - *Prefilter:* Uses the C++ `osmium-tool` binary to stream the massive PBF files and discard all non-railway data.
-   - *Parse:* Uses `pyrosm` to read the filtered PBF into GeoPandas DataFrames. Extracts tracks (`rail`, `narrow_gauge`) and stations (`station`, `halt`). Saves as `.geojson`.
+   - *Parse:* Uses `pyrosm` to read the raw PBF into GeoPandas DataFrames. Extracts tracks (`rail`, `narrow_gauge`), stations (`station`, `halt`), and additional attributes like `platform`. Saves as `.geojson`. (Note: The `osmium-tool` pre-filter step was bypassed after upgrading the VM to 96GB RAM, allowing direct extraction).
 3. **Convert (`03_convert_to_kml.py`)**: Custom *Streaming XML Generator* to write `.kml` directly to disk.
 4. **Upload (`04_upload_to_gcs.py`)**: Uploads all files to the GCS bucket concurrently.
 
 ### 3.2 Data Flow
 ```
-.osm.pbf (Geofabrik) → osmium filter → pyrosm → .geojson → Streaming KML → .kml → GCS Bucket
+.osm.pbf (Geofabrik) → pyrosm → .geojson → stations.json (registry) & Streaming KML → .kml → GCS Bucket
 ```
 
 ---
@@ -173,6 +172,12 @@ The v2 model processes a 3-feature local radar for **one train at a time**. Beca
 - **Framework:** FastAPI + Google Maps API (Light Mode).
 - **Root URL:** `http://127.0.0.1:8000/`
 - **API Key:** Requires `GOOGLE_MAPS_API_KEY` environment variable (loaded via `python-dotenv` from `.env` file).
+
+### 7.6 Station Registry (`data_preparation/05b_build_station_registry.py`)
+- Builds a `stations.json` registry from GeoJSON station data, snapping stations to the railway graph nodes and computing platform counts.
+- Output: `data/processed/geojson/{country}/stations.json` — a dict keyed by node ID, each entry containing station name, coordinates, and platform_count.
+- Required for `/api/stations` endpoint to provide platform information in station dropdowns.
+- Depends on: `geopandas`, `core_engine/06_spatial_routing.py` (RailwayRouter for node snapping).
 
 ### 7.2 API Endpoints
 | Endpoint | Method | Description |
