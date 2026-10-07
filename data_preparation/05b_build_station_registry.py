@@ -127,10 +127,7 @@ def build_station_registry(country_code="uk"):
             dropped_reasons['no_name'] += 1
             continue
             
-        if name in ['Euston Square', 'Grosmont', 'Lakeside']:
-            dropped_reasons['metro_light_rail'] += 1
-            continue
-            
+
         valid_indices.append(idx)
         
     stations_gdf = stations_gdf.loc[valid_indices].copy()
@@ -217,11 +214,22 @@ def build_station_registry(country_code="uk"):
             refs = []
             geoms = []
             for _, p_row in group.iterrows():
+                c_wgs84 = gpd.GeoSeries([p_row.geometry.centroid], crs="EPSG:27700").to_crs("EPSG:4326").iloc[0]
+                try:
+                    _, _, d_km = router.find_nearest_node(c_wgs84.y, c_wgs84.x)
+                    if d_km > 0.05:
+                        continue
+                except:
+                    continue
+                    
                 ref = p_row.get('ref')
                 if ref and not pd.isna(ref):
+                    import re
                     for r in str(ref).split(';'):
-                        if r.strip():
-                            refs.append(r.strip())
+                        r = r.strip().lower()
+                        r = re.sub(r'[a-z]+$', '', r)
+                        if r:
+                            refs.append(r)
                 else:
                     geoms.append(p_row.geometry)
             
@@ -299,8 +307,10 @@ def build_station_registry(country_code="uk"):
             
     logger.info(f"Final registry size: {len(registry)}")
     
+    sorted_registry = {k: registry[k] for k in sorted(registry.keys())}
+    
     with open(out_file, "w", encoding="utf-8") as f:
-        json.dump(registry, f, indent=2)
+        json.dump(sorted_registry, f, indent=2)
         
     logger.info(f"Saved station registry to {out_file}")
 

@@ -51,7 +51,7 @@ The project is divided into the following phases:
 | `stable-baselines3[extra]` | ≥ 2.0.0 | PPO agent training & inference |
 | `torch` | (via SB3) | Neural network backend |
 | `google-cloud-storage` | ≥ 2.14.0 | GCS integration |
-| `osmium` | ≥ 3.7.0 | PBF streaming pre-filter |
+| `osmium` | ≥ 3.7.0 | PBF streaming pre-filter (bypassed; retained for legacy compatibility) |
 | `python-dotenv` | ≥ 1.0.0 | Environment variable loading |
 
 ### 2.3 System Dependencies (apt)
@@ -176,12 +176,21 @@ The v2 model processes a 3-feature local radar for **one train at a time**. Beca
 
 ### 7.6 Station Registry (`data_preparation/05b_build_station_registry.py`)
 - Builds a `stations.json` registry from GeoJSON station data, snapping stations to the railway graph nodes.
-- **Deduplication:** Uses 500m spatial clustering to merge duplicate stations and assigns a `display_name` to handle naming collisions.
-- **Platform Counts:** Accurately determines platform counts by cross-referencing actual OSM platform geometries (extracted via `extract_platforms_only.py`), using curated overrides, and parsing OSM platform tags. Records the `platform_source`.
-- **Validation:** Platform counts are tested against real-world anchor stations and hold-out sets using `validate_station_registry.py`, which leverages config files like `config/reference/uk_validation_holdout.json`. It also verifies that prohibited non-mainline/heritage stations (e.g., Euston Square, Grosmont) are successfully excluded.
-- Output: `data/processed/geojson/{country}/stations.json` — a dict keyed by primary OSM ID, each entry containing station name, display name, coordinates, platform count, and platform source.
-- Required for `/api/stations` endpoint to provide platform information in station dropdowns.
-- Depends on: `geopandas`, `core_engine/06_spatial_routing.py` (RailwayRouter for node snapping).
+- **Filtering:** Excludes non-mainline stations by inspecting OSM tags (`subway`, `light_rail`, `tram`, `preserved`, `miniature`, `disused`, `abandoned`, `construction`). Stations tagged as `usage=tourism` are also dropped. Stations belonging to `network=National Rail` are protected from tag-based exclusion.
+- **Deduplication:** Uses 500m spatial clustering with fuzzy substring name matching to merge duplicate station POIs. Assigns disambiguated `display_name`s for any remaining name collisions.
+- **Platform Counts (4-tier priority):**
+  1. **Curated overrides** from `config/reference/uk_major_station_platforms.json`.
+  2. **OSM platform geometries** (extracted via `extract_platforms_only.py`): assigned to nearest station cluster via `sjoin_nearest` (150m max). Each platform is validated to be within 50m of a track node. Platform `ref` tags are parsed and alpha suffixes stripped (e.g., `3a` → `3`) to count distinct physical platforms.
+  3. **OSM `platforms` tag** on the station node itself.
+  4. **Default** fallback of 2.
+- **Output:** `data/processed/geojson/{country}/stations.json` — sorted by key, each entry keyed by primary OSM ID with: name, display_name, lat/lon, platform_count, platform_source, and graph_node_id.
+- **Validation (`validate_station_registry.py`):**
+  - Enforces non-curated platform counts ≤ 24.
+  - Enforces default-sourced stations ≤ 10% of registry.
+  - Checks for duplicate display names.
+  - Tag-based verification: cross-references raw GeoJSON to ensure no station with forbidden tags (subway, light_rail, tram, preserved, miniature) survived filtering.
+  - Hold-out comparison against `config/reference/uk_validation_holdout.json` with tolerance of ±1.
+- Depends on: `geopandas`, `core_engine/06_spatial_routing.py` (RailwayRouter for node snapping and 50m track proximity validation).
 
 ### 7.2 API Endpoints
 | Endpoint | Method | Description |

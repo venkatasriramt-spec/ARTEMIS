@@ -264,6 +264,21 @@ This document records the chronological development of ARTEMIS, including all ma
 ### 2026-10-07 — .gitignore Review
 - Reviewed `.gitignore` for GitHub commit readiness. Properly excludes generated data, model zips, environment files, and IDE artifacts while allowing source code and clean weight files to be committed.
 
+### 2026-10-07 — Station Registry Refinement (Iteration 2)
+- **Updated** `data_preparation/05b_build_station_registry.py`:
+  - Removed hardcoded prohibited name list (Euston Square, Grosmont, Lakeside) in favour of tag-based filtering already handled earlier in the pipeline.
+  - Added 50m track-proximity validation for platform geometries: each platform's centroid is snapped to the nearest graph node, and platforms farther than 50m from any track are discarded (eliminates bus stops and parking structures mistagged as rail platforms).
+  - Platform `ref` tags are now normalized: alpha suffixes are stripped (e.g., `3a` → `3`) to correctly count distinct physical platforms.
+  - Registry output is now sorted by key for deterministic JSON diffs.
+- **Updated** `data_preparation/extract_platforms_only.py`:
+  - Added `subway`, `light_rail`, and `tram` to the extraction attributes and filtering masks, ensuring non-mainline platforms are excluded before they reach the registry builder.
+- **Updated** `data_preparation/validate_station_registry.py`:
+  - Replaced hardcoded prohibited name checks with tag-based verification: cross-references each registry entry against the raw GeoJSON to ensure no station with forbidden OSM tags (`subway`, `light_rail`, `tram`, `preserved`, `miniature`) survived filtering.
+  - Tightened hold-out tolerance from ±2 to ±1 platforms.
+  - Added top-20 platform count report for quick manual inspection.
+- **Updated** `config/reference/uk_validation_holdout.json`:
+  - Corrected platform counts for Ipswich (6 → 4) and Norwich (12 → 6) based on Wikipedia verification.
+
 ---
 
 ## Current Status (2026-10-07)

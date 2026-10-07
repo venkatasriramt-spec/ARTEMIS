@@ -61,13 +61,31 @@ def validate_registry():
     else:
         print("SUCCESS: 0 duplicate display names.")
         
-    # Check prohibited names
-    reg_names = {v.get("name") for v in registry.values()}
-    prohibited = {"Euston Square", "Grosmont", "Lakeside"}
-    for name in reg_names:
-        if name in prohibited:
-            print(f"FAIL: Prohibited metro/heritage name found: {name}")
-            sys.exit(1)
+    # Tag-based check
+    import geopandas as gpd
+    raw_stations = gpd.read_file('data/processed/geojson/uk/uk_stations.geojson')
+    
+    surviving_invalid = []
+    for key, d in registry.items():
+        # Find the row in raw_stations
+        row = raw_stations[raw_stations['id'] == int(key)]
+        if not row.empty:
+            row = row.iloc[0]
+            is_invalid = False
+            for tag in ['subway', 'light_rail', 'tram', 'preserved', 'miniature']:
+                if str(row.get(tag, '')).lower() in ['yes', 'true', '1']:
+                    is_invalid = True
+                    break
+            if str(row.get('station', '')).lower() in ['subway', 'light_rail', 'tram', 'miniature']:
+                is_invalid = True
+                
+            if is_invalid:
+                if 'national rail' not in str(row.get('network', '')).lower():
+                    surviving_invalid.append(d['name'])
+                    
+    if surviving_invalid:
+        print(f"FAIL: Found {len(surviving_invalid)} stations with forbidden tags in registry. Examples: {list(set(surviving_invalid))[:5]}")
+        sys.exit(1)
             
     # Holdout checks
     holdout_path = Path("config/reference/uk_validation_holdout.json")
@@ -85,7 +103,7 @@ def validate_registry():
                     found = True
                     actual = data.get("platform_count", 0)
                     print(f"  {h_name}: Expected {expected}, Actual {actual} ({data.get('platform_source')})")
-                    if abs(actual - expected) > 2:
+                    if abs(actual - expected) > 1:
                         holdout_fails.append(f"{h_name}: Expected {expected}, got {actual}")
                     break
             if not found:

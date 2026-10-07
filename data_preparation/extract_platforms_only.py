@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 from pyrosm import OSM
 import geopandas as gpd
-
+import pandas as pd
 def save_geojson(gdf, output_path):
     for col in gdf.columns:
         if col == "geometry": continue
@@ -27,13 +27,20 @@ def main():
         keep_nodes=True,
         keep_ways=True,
         keep_relations=True,
-        extra_attributes=["name", "ref", "train", "bus", "highway"]
+        extra_attributes=["name", "ref", "train", "bus", "highway", "subway", "light_rail", "tram"]
     )
     
     if platforms_gdf is not None and not platforms_gdf.empty:
         mask = ~platforms_gdf.get("bus", pd.Series(dtype=str)).isin(["yes"])
         if "highway" in platforms_gdf.columns:
             mask &= platforms_gdf["highway"].isna()
+            
+        if "subway" in platforms_gdf.columns:
+            mask &= ~platforms_gdf["subway"].isin(["yes"])
+        if "light_rail" in platforms_gdf.columns:
+            mask &= ~platforms_gdf["light_rail"].isin(["yes"])
+        if "tram" in platforms_gdf.columns:
+            mask &= ~platforms_gdf["tram"].isin(["yes"])
         
         is_railway = platforms_gdf.get("railway", pd.Series(dtype=str)).notna()
         is_train = platforms_gdf.get("train", pd.Series(dtype=str)).isin(["yes"])
