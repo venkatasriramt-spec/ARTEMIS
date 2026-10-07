@@ -11,7 +11,8 @@ Extract, route, and visualize railway networks across 14 countries using OpenStr
 ```
 ARTEMIS/
 ├── config/
-│   └── countries.json                  # Country metadata & download URLs
+│   ├── countries.json                  # Country metadata & download URLs
+│   └── reference/                      # Curated overrides and hold-out sets
 ├── data_preparation/                   # Scripts to process map data and build graphs
 │   ├── 01_download_pbf.py
 │   ├── 02_extract_railway.py

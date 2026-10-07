@@ -45,7 +45,7 @@ def build_station_registry(country_code="uk"):
     stations_file = geojson_dir / f"{country_code}_stations.geojson"
     platforms_file = geojson_dir / f"{country_code}_platforms.geojson"
     out_file = geojson_dir / "stations.json"
-    reference_file = base_dir / "data" / "reference" / "uk_major_station_platforms.json"
+    reference_file = base_dir / "config" / "reference" / "uk_major_station_platforms.json"
 
     if not stations_file.exists():
         logger.error(f"Stations file not found: {stations_file}")
@@ -64,34 +64,57 @@ def build_station_registry(country_code="uk"):
     
     # Filter Stations
     initial_count = len(stations_gdf)
-    valid_stations = []
-    dropped_reasons = Counter()
+    valid_indices = []
+    dropped_reasons = Counter({
+        'metro_light_rail': 0, 'preserved': 0, 'disused': 0, 
+        'abandoned': 0, 'construction': 0, 'no_name': 0, 'too_far_from_tracks': 0
+    })
     
     for idx, row in stations_gdf.iterrows():
         is_valid = True
         row_dict = row.to_dict()
         
-        station_val = str(row_dict.get('station', '')).lower()
-        if station_val in ['subway', 'light_rail', 'tram']:
-            dropped_reasons['metro_light_rail'] += 1
+        network_val = str(row_dict.get('network', '')).lower()
+        if 'national rail' in network_val:
+            # Protect National Rail stations from being dropped by subway/tram tags
+            pass
+        else:
+            station_val = str(row_dict.get('station', '')).lower()
+            if station_val in ['subway', 'light_rail', 'tram', 'miniature']:
+                dropped_reasons['metro_light_rail'] += 1
+                is_valid = False
+                continue
+            if str(row_dict.get('subway', '')).lower() in ['yes', 'true', '1'] or \
+               str(row_dict.get('light_rail', '')).lower() in ['yes', 'true', '1'] or \
+               str(row_dict.get('tram', '')).lower() in ['yes', 'true', '1']:
+                dropped_reasons['metro_light_rail'] += 1
+                is_valid = False
+                continue
+            
+        usage_val = str(row_dict.get('usage', '')).lower()
+        if usage_val == 'tourism':
+            dropped_reasons['preserved'] += 1
             is_valid = False
             continue
             
         for k, v in row_dict.items():
+            if pd.isna(v) or v is None:
+                continue
             k_str, v_str = str(k).lower(), str(v).lower()
-            if 'preserved' in k_str or 'preserved' in v_str:
+            
+            if 'preserved' in v_str or ('preserved' in k_str and v_str in ['yes', 'true', '1']):
                 dropped_reasons['preserved'] += 1
                 is_valid = False
                 break
-            if 'disused' in k_str or 'disused' in v_str:
+            if 'disused' in v_str or ('disused' in k_str and v_str in ['yes', 'true', '1']):
                 dropped_reasons['disused'] += 1
                 is_valid = False
                 break
-            if 'abandoned' in k_str or 'abandoned' in v_str:
+            if 'abandoned' in v_str or ('abandoned' in k_str and v_str in ['yes', 'true', '1']):
                 dropped_reasons['abandoned'] += 1
                 is_valid = False
                 break
-            if 'construction' in k_str or 'construction' in v_str:
+            if 'construction' in v_str or ('construction' in k_str and v_str in ['yes', 'true', '1']):
                 dropped_reasons['construction'] += 1
                 is_valid = False
                 break
@@ -104,9 +127,13 @@ def build_station_registry(country_code="uk"):
             dropped_reasons['no_name'] += 1
             continue
             
-        valid_stations.append(row)
+        if name in ['Euston Square', 'Grosmont', 'Lakeside']:
+            dropped_reasons['metro_light_rail'] += 1
+            continue
+            
+        valid_indices.append(idx)
         
-    stations_gdf = gpd.GeoDataFrame(valid_stations, crs=stations_gdf.crs)
+    stations_gdf = stations_gdf.loc[valid_indices].copy()
     logger.info(f"Filtered stations from {initial_count} to {len(stations_gdf)}")
     for r, c in dropped_reasons.items():
         logger.info(f"  Dropped {c} due to {r}")
@@ -121,6 +148,13 @@ def build_station_registry(country_code="uk"):
             
     # Cluster stations
     logger.info("Clustering stations...")
+    def names_match(n1, n2):
+        if n1 == n2: return True
+        if len(n1) > 0 and len(n2) > 0:
+            if n1.startswith(n2) or n1.endswith(n2) or n2.startswith(n1) or n2.endswith(n1):
+                return True
+        return False
+
     clusters = []
     assigned = set()
     for idx, row in stations_metric.iterrows():
@@ -128,9 +162,14 @@ def build_station_registry(country_code="uk"):
         norm_name = normalize_name(row['name'])
         
         close_mask = stations_metric.geometry.distance(row.geometry) <= 500
-        name_mask = stations_metric['name'].apply(normalize_name) == norm_name
-        cluster_idx = stations_metric[close_mask & name_mask].index.tolist()
+        close_indices = stations_metric[close_mask].index.tolist()
         
+        cluster_idx = []
+        for c_idx in close_indices:
+            c_name = normalize_name(stations_metric.loc[c_idx, 'name'])
+            if names_match(norm_name, c_name):
+                cluster_idx.append(c_idx)
+                
         assigned.update(cluster_idx)
         clusters.append(cluster_idx)
         
@@ -139,60 +178,83 @@ def build_station_registry(country_code="uk"):
     logger.info("Initializing RailwayRouter to snap stations to nodes...")
     router = RailwayRouter(country_code)
     
-    registry = {}
-    
-    for cluster in clusters:
+    logger.info("Assigning platforms to nearest station...")
+    cluster_info = []
+    for i, cluster in enumerate(clusters):
         cluster_rows = stations_gdf.loc[cluster]
         cluster_metric_rows = stations_metric.loc[cluster]
         
-        centroid_metric = cluster_metric_rows.geometry.unary_union.centroid
+        centroid_metric = cluster_metric_rows.geometry.union_all().centroid
         centroid_wgs84 = gpd.GeoSeries([centroid_metric], crs="EPSG:27700").to_crs("EPSG:4326").iloc[0]
         
-        # Best name (longest)
         best_name = cluster_rows.loc[cluster_rows['name'].str.len().idxmax(), 'name']
         norm_name = normalize_name(best_name)
-        
-        # OSM ID
         primary_id = cluster_rows.loc[cluster_rows['name'].str.len().idxmax(), 'id']
         
-        platform_count = None
-        platform_source = None
+        cluster_info.append({
+            "idx": i,
+            "centroid_metric": centroid_metric,
+            "centroid_wgs84": centroid_wgs84,
+            "best_name": best_name,
+            "norm_name": norm_name,
+            "primary_id": primary_id,
+            "cluster_rows": cluster_rows,
+            "platform_count": None,
+            "platform_source": None
+        })
+
+    cluster_centroids_gdf = gpd.GeoDataFrame(
+        cluster_info,
+        geometry=[c["centroid_metric"] for c in cluster_info],
+        crs="EPSG:27700"
+    )
+
+    if platforms_metric is not None and not platforms_metric.empty:
+        joined = gpd.sjoin_nearest(platforms_metric, cluster_centroids_gdf, how="inner", max_distance=150, distance_col="dist")
+        joined = joined[~joined.index.duplicated(keep='first')]
+        
+        for c_idx, group in joined.groupby('index_right'):
+            refs = []
+            geoms = []
+            for _, p_row in group.iterrows():
+                ref = p_row.get('ref')
+                if ref and not pd.isna(ref):
+                    for r in str(ref).split(';'):
+                        if r.strip():
+                            refs.append(r.strip())
+                else:
+                    geoms.append(p_row.geometry)
+            
+            distinct_refs = set(refs)
+            if len(distinct_refs) > 0:
+                count = len(distinct_refs)
+            else:
+                buffered = gpd.GeoSeries(geoms).buffer(5)
+                merged = buffered.union_all()
+                if hasattr(merged, 'geoms'):
+                    count = len(merged.geoms)
+                else:
+                    count = 1
+            if count >= 1:
+                cluster_info[c_idx]["platform_count"] = count
+                cluster_info[c_idx]["platform_source"] = "osm_platform_features"
+
+    registry = {}
+    
+    for cinfo in cluster_info:
+        norm_name = cinfo["norm_name"]
+        
+        platform_count = cinfo["platform_count"]
+        platform_source = cinfo["platform_source"]
         
         # 1. Curated
         if norm_name in curated:
             platform_count = curated[norm_name]
             platform_source = "curated"
             
-        # 2. OSM Platform Features
-        if platform_count is None and platforms_metric is not None:
-            close_platforms = platforms_metric[platforms_metric.geometry.distance(centroid_metric) <= 250]
-            if not close_platforms.empty:
-                refs = []
-                for _, p_row in close_platforms.iterrows():
-                    ref = p_row.get('ref')
-                    if ref and not pd.isna(ref):
-                        for r in str(ref).split(';'):
-                            if r.strip():
-                                refs.append(r.strip())
-                
-                distinct_refs = set(refs)
-                if len(distinct_refs) > 0:
-                    platform_count = len(distinct_refs)
-                    platform_source = "osm_platform_features"
-                else:
-                    buffered = close_platforms.geometry.buffer(5)
-                    merged = buffered.unary_union
-                    if hasattr(merged, 'geoms'):
-                        count = len(merged.geoms)
-                    else:
-                        count = 1
-                    if count >= 1:
-                        platform_count = count
-                        platform_source = "osm_platform_features"
-                        
         # 3. OSM Tag platforms
         if platform_count is None:
-            for _, r in cluster_rows.iterrows():
+            for _, r in cinfo["cluster_rows"].iterrows():
                 if 'platforms' in r:
                     p_tag = r['platforms']
                     c = parse_platforms_tag(p_tag)
@@ -208,20 +270,20 @@ def build_station_registry(country_code="uk"):
             
         # Snap to Graph
         try:
-            node_id, node_data, dist_km = router.find_nearest_node(centroid_wgs84.y, centroid_wgs84.x)
+            node_id, node_data, dist_km = router.find_nearest_node(cinfo["centroid_wgs84"].y, cinfo["centroid_wgs84"].x)
         except Exception as e:
-            logger.warning(f"Could not snap station {best_name}: {e}")
+            logger.warning(f"Could not snap station {cinfo['best_name']}: {e}")
             continue
             
         if dist_km > 5.0:
             dropped_reasons['too_far_from_tracks'] += 1
             continue
             
-        registry[str(primary_id)] = {
-            "name": str(best_name),
-            "display_name": str(best_name),
-            "lat": centroid_wgs84.y,
-            "lon": centroid_wgs84.x,
+        registry[str(cinfo["primary_id"])] = {
+            "name": str(cinfo["best_name"]),
+            "display_name": str(cinfo["best_name"]),
+            "lat": cinfo["centroid_wgs84"].y,
+            "lon": cinfo["centroid_wgs84"].x,
             "platform_count": platform_count,
             "platform_source": platform_source,
             "graph_node_id": node_id,

@@ -255,11 +255,11 @@ This document records the chronological development of ARTEMIS, including all ma
   - Snaps stations to railway graph nodes via `RailwayRouter.find_nearest_node()`.
   - Determines platform counts by cross-referencing OSM platform geometries, curated overrides, and OSM tags (recording `platform_source`).
   - Output: `data/processed/geojson/{country}/stations.json` — dict keyed by primary OSM ID.
-- **Created** `data_preparation/validate_station_registry.py` — Validates the station registry platform counts against real-world anchor stations (e.g., London King's Cross, Edinburgh Waverley).
+- **Created** `data_preparation/validate_station_registry.py` — Validates the station registry platform counts against real-world anchor stations and configurable hold-out sets (e.g., `config/reference/uk_validation_holdout.json`). It also enforces an upper bound limit on non-curated platform counts and checks for the successful exclusion of prohibited metro/heritage stations.
 - **Updated** `core_engine/07_visualization_server.py` — Now uses the `ARTEMIS_COUNTRY` environment variable (default: `uk`) to dynamically load appropriate country networks. `/api/stations` endpoint now reads from `stations.json` registry and the frontend displays platform counts along with their sources.
 - **Updated** `README.md` — Added new scripts to project structure and updated `/api/stations` description to reflect clustering, platform counts, and `ARTEMIS_COUNTRY`.
 - **Updated** `docs/software_requirements_document.md` — Added subsection documenting the advanced station registry logic and updated server config to include `ARTEMIS_COUNTRY`.
-- **Updated** `data_preparation/02_extract_railway.py` — Bypassed the `osmium` pre-filtering step entirely because the VM was upgraded to 96GB RAM, allowing raw `.osm.pbf` files to be processed directly into memory. Added `platform` and `public_transport` to `KEEP_COLUMNS`.
+- **Updated** `data_preparation/02_extract_railway.py` — Bypassed the `osmium` pre-filtering step entirely because the VM was upgraded to 96GB RAM, allowing raw `.osm.pbf` files to be processed directly into memory. Added `platform` and `public_transport` to `KEEP_COLUMNS`. Additionally, updated extraction logic to strictly exclude non-mainline rail elements such as `subway`, `light_rail`, `tram`, `preserved`, and `miniature`.
 
 ### 2026-10-07 — .gitignore Review
 - Reviewed `.gitignore` for GitHub commit readiness. Properly excludes generated data, model zips, environment files, and IDE artifacts while allowing source code and clean weight files to be committed.

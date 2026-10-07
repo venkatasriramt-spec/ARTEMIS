@@ -48,6 +48,7 @@ KEEP_COLUMNS = [
     "usage", "service", "tracks", "bridge", "tunnel",
     "ref", "network", "wikipedia", "wikidata",
     "platform", "public_transport", "platforms",
+    "station", "railway:preserved", "disused", "abandoned", "construction", "light_rail", "subway", "tram", "bus", "highway", "train"
 ]
 
 
@@ -323,18 +324,30 @@ def extract_country(
         osm = OSM(str(filtered_pbf))
         console.print("  [dim]Extracting platform features...[/dim]")
         platforms_gdf = osm.get_data_by_custom_criteria(
-            custom_filter={"railway": ["platform"], "public_transport": ["platform"]},
+            custom_filter={"railway": ["platform", "platform_edge"], "public_transport": ["platform"]},
             filter_type="keep",
             keep_nodes=True,
             keep_ways=True,
             keep_relations=True,
-            extra_attributes=["name", "ref"]
+            extra_attributes=["name", "ref", "train", "bus", "highway"]
         )
         if platforms_gdf is not None and not platforms_gdf.empty:
-            platforms_file = country_output / f"{country_code}_platforms.geojson"
-            save_geojson(platforms_gdf, platforms_file)
-            result["output_files"].append(str(platforms_file))
-            console.print(f"  [green]✓ Extracted {len(platforms_gdf)} platforms[/green]")
+            mask = ~platforms_gdf.get("bus", pd.Series(dtype=str)).isin(["yes"])
+            if "highway" in platforms_gdf.columns:
+                mask &= platforms_gdf["highway"].isna()
+            
+            is_railway = platforms_gdf.get("railway", pd.Series(dtype=str)).notna()
+            is_train = platforms_gdf.get("train", pd.Series(dtype=str)).isin(["yes"])
+            is_pt = platforms_gdf.get("public_transport", pd.Series(dtype=str)) == "platform"
+            
+            valid_pt = ~is_pt | is_railway | is_train
+            
+            platforms_gdf = platforms_gdf[mask & valid_pt].copy()
+            if not platforms_gdf.empty:
+                platforms_file = country_output / f"{country_code}_platforms.geojson"
+                save_geojson(platforms_gdf, platforms_file)
+                result["output_files"].append(str(platforms_file))
+                console.print(f"  [green]✓ Extracted {len(platforms_gdf)} platforms[/green]")
     except Exception as e:
         console.print(f"  [red]Failed to extract platforms: {e}[/red]")
 

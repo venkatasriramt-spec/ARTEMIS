@@ -67,7 +67,7 @@ The project is divided into the following phases:
 ### 3.1 Pipeline Steps
 1. **Download (`01_download_pbf.py`)**: Concurrently fetches `.osm.pbf` files for 14 countries from Geofabrik using multi-threading.
 2. **Extract (`02_extract_railway.py`)**:
-   - *Parse:* Uses `pyrosm` to read the raw PBF into GeoPandas DataFrames. Extracts tracks (`rail`, `narrow_gauge`), stations (`station`, `halt`), and additional attributes like `platform`. Saves as `.geojson`. (Note: The `osmium-tool` pre-filter step was bypassed after upgrading the VM to 96GB RAM, allowing direct extraction).
+   - *Parse:* Uses `pyrosm` to read the raw PBF into GeoPandas DataFrames. Extracts tracks (`rail`, `narrow_gauge`), stations (`station`, `halt`), and additional attributes like `platform`. Excludes non-mainline rail (e.g., `subway`, `light_rail`, `tram`, `preserved`, `miniature`). Saves as `.geojson`. (Note: The `osmium-tool` pre-filter step was bypassed after upgrading the VM to 96GB RAM, allowing direct extraction).
 3. **Convert (`03_convert_to_kml.py`)**: Custom *Streaming XML Generator* to write `.kml` directly to disk.
 4. **Upload (`04_upload_to_gcs.py`)**: Uploads all files to the GCS bucket concurrently.
 
@@ -178,7 +178,7 @@ The v2 model processes a 3-feature local radar for **one train at a time**. Beca
 - Builds a `stations.json` registry from GeoJSON station data, snapping stations to the railway graph nodes.
 - **Deduplication:** Uses 500m spatial clustering to merge duplicate stations and assigns a `display_name` to handle naming collisions.
 - **Platform Counts:** Accurately determines platform counts by cross-referencing actual OSM platform geometries (extracted via `extract_platforms_only.py`), using curated overrides, and parsing OSM platform tags. Records the `platform_source`.
-- **Validation:** Platform counts are tested against real-world anchor stations using `validate_station_registry.py`.
+- **Validation:** Platform counts are tested against real-world anchor stations and hold-out sets using `validate_station_registry.py`, which leverages config files like `config/reference/uk_validation_holdout.json`. It also verifies that prohibited non-mainline/heritage stations (e.g., Euston Square, Grosmont) are successfully excluded.
 - Output: `data/processed/geojson/{country}/stations.json` — a dict keyed by primary OSM ID, each entry containing station name, display name, coordinates, platform count, and platform source.
 - Required for `/api/stations` endpoint to provide platform information in station dropdowns.
 - Depends on: `geopandas`, `core_engine/06_spatial_routing.py` (RailwayRouter for node snapping).

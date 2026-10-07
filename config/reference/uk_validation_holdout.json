@@ -1,0 +1,10 @@
+{
+  "Swindon": { "count": 4, "url": "https://en.wikipedia.org/wiki/Swindon_railway_station" },
+  "Oxford": { "count": 4, "url": "https://en.wikipedia.org/wiki/Oxford_railway_station" },
+  "Cambridge": { "count": 8, "url": "https://en.wikipedia.org/wiki/Cambridge_railway_station" },
+  "Exeter St Davids": { "count": 6, "url": "https://en.wikipedia.org/wiki/Exeter_St_Davids_railway_station" },
+  "Ipswich": { "count": 6, "url": "https://en.wikipedia.org/wiki/Ipswich_railway_station" },
+  "Norwich": { "count": 12, "url": "https://en.wikipedia.org/wiki/Norwich_railway_station" },
+  "Preston": { "count": 7, "url": "https://en.wikipedia.org/wiki/Preston_railway_station" },
+  "Doncaster": { "count": 9, "url": "https://en.wikipedia.org/wiki/Doncaster_railway_station" }
+}

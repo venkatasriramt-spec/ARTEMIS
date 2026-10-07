@@ -22,18 +22,33 @@ def main():
     
     print("Extracting platforms...")
     platforms_gdf = osm.get_data_by_custom_criteria(
-        custom_filter={"railway": ["platform"], "public_transport": ["platform"]},
+        custom_filter={"railway": ["platform", "platform_edge"], "public_transport": ["platform"]},
         filter_type="keep",
         keep_nodes=True,
         keep_ways=True,
         keep_relations=True,
-        extra_attributes=["name", "ref"]
+        extra_attributes=["name", "ref", "train", "bus", "highway"]
     )
     
     if platforms_gdf is not None and not platforms_gdf.empty:
-        output_path = Path("data/processed/geojson/uk/uk_platforms.geojson")
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        save_geojson(platforms_gdf, output_path)
+        mask = ~platforms_gdf.get("bus", pd.Series(dtype=str)).isin(["yes"])
+        if "highway" in platforms_gdf.columns:
+            mask &= platforms_gdf["highway"].isna()
+        
+        is_railway = platforms_gdf.get("railway", pd.Series(dtype=str)).notna()
+        is_train = platforms_gdf.get("train", pd.Series(dtype=str)).isin(["yes"])
+        is_pt = platforms_gdf.get("public_transport", pd.Series(dtype=str)) == "platform"
+        
+        valid_pt = ~is_pt | is_railway | is_train
+        
+        platforms_gdf = platforms_gdf[mask & valid_pt].copy()
+        
+        if not platforms_gdf.empty:
+            output_path = Path("data/processed/geojson/uk/uk_platforms.geojson")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            save_geojson(platforms_gdf, output_path)
+        else:
+            print("No platforms found after filtering.")
     else:
         print("No platforms found.")
 

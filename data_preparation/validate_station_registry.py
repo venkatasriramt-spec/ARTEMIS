@@ -27,12 +27,18 @@ def validate_registry():
         sources[data.get("platform_source", "default")] += 1
         display_names.append(data.get("display_name", data.get("name")))
         
-    # Check max platform
-    max_plat = max(counts)
-    print(f"Max platform count: {max_plat}")
-    if max_plat < 15:
-        print(f"FAIL: Max platform count {max_plat} is < 15")
-        sys.exit(1)
+    # Check max platform for non-curated
+    max_plat = 0
+    for data in registry.values():
+        c = data.get("platform_count", 0)
+        s = data.get("platform_source", "default")
+        if s != "curated" and c > max_plat:
+            max_plat = c
+        if s != "curated" and c > 24:
+            print(f"FAIL: Non-curated station {data['name']} has >24 platforms ({c})")
+            sys.exit(1)
+            
+    print(f"Max non-curated platform count: {max_plat}")
         
     # Distribution
     print("\nPlatform Source Distribution:")
@@ -43,6 +49,9 @@ def validate_registry():
     # Check default %
     default_pct = (sources.get("default", 0) / len(registry)) * 100
     print(f"Percentage on 'default': {default_pct:.1f}%")
+    if default_pct > 10.0:
+        print(f"FAIL: default percentage {default_pct:.1f}% is > 10%")
+        sys.exit(1)
     
     # Check duplicate display names
     dup_names = [name for name, count in Counter(display_names).items() if count > 1]
@@ -52,37 +61,49 @@ def validate_registry():
     else:
         print("SUCCESS: 0 duplicate display names.")
         
-    # Anchor checks
-    anchors = {
-        "London King's Cross": (10, 14),
-        "Edinburgh Waverley": (16, 22),
-        "Reading": (12, 17),
-        "Crewe": (10, 14),
-        "Birmingham New Street": (10, 13),
-        "Clapham Junction": (15, 18),
-        "Manchester Piccadilly": (12, 15)
-    }
-    
-    anchor_fails = []
-    for anchor, (min_c, max_c) in anchors.items():
-        found = False
-        for data in registry.values():
-            if data.get("name") == anchor:
-                found = True
-                c = data.get("platform_count", 0)
-                if not (min_c <= c <= max_c):
-                    anchor_fails.append(f"{anchor} has {c} platforms, expected {min_c}-{max_c}")
-                break
-        if not found:
-            anchor_fails.append(f"{anchor} not found in registry")
+    # Check prohibited names
+    reg_names = {v.get("name") for v in registry.values()}
+    prohibited = {"Euston Square", "Grosmont", "Lakeside"}
+    for name in reg_names:
+        if name in prohibited:
+            print(f"FAIL: Prohibited metro/heritage name found: {name}")
+            sys.exit(1)
             
-    if anchor_fails:
-        print("FAIL: Anchor checks failed:")
-        for fail in anchor_fails:
-            print(f"  {fail}")
-        sys.exit(1)
-    else:
-        print("SUCCESS: All anchor checks passed.")
+    # Holdout checks
+    holdout_path = Path("config/reference/uk_validation_holdout.json")
+    if holdout_path.exists():
+        with open(holdout_path, "r") as f:
+            holdouts = json.load(f)
+            
+        print("\nHold-out Comparison (Expected vs Actual):")
+        holdout_fails = []
+        for h_name, h_data in holdouts.items():
+            expected = h_data["count"]
+            found = False
+            for data in registry.values():
+                if data.get("name") == h_name:
+                    found = True
+                    actual = data.get("platform_count", 0)
+                    print(f"  {h_name}: Expected {expected}, Actual {actual} ({data.get('platform_source')})")
+                    if abs(actual - expected) > 2:
+                        holdout_fails.append(f"{h_name}: Expected {expected}, got {actual}")
+                    break
+            if not found:
+                holdout_fails.append(f"{h_name} not found in registry")
+                
+        if holdout_fails:
+            print("FAIL: Holdout checks failed:")
+            for fail in holdout_fails:
+                print(f"  {fail}")
+            sys.exit(1)
+        else:
+            print("SUCCESS: All holdout checks passed.")
+            
+    # Top 20 stations
+    print("\nTop 20 stations by platform count:")
+    sorted_stations = sorted(registry.values(), key=lambda x: x.get("platform_count", 0), reverse=True)
+    for i, data in enumerate(sorted_stations[:20]):
+        print(f"  {i+1}. {data['name']}: {data['platform_count']} ({data['platform_source']})")
         
     print("\nValidation passed successfully!")
 
