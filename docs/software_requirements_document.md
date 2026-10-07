@@ -172,10 +172,14 @@ The v2 model processes a 3-feature local radar for **one train at a time**. Beca
 - **Framework:** FastAPI + Google Maps API (Light Mode).
 - **Root URL:** `http://127.0.0.1:8000/`
 - **API Key:** Requires `GOOGLE_MAPS_API_KEY` environment variable (loaded via `python-dotenv` from `.env` file).
+- **Country Selection:** Uses the `ARTEMIS_COUNTRY` environment variable (defaults to `uk`) to dynamically load the appropriate network, stations, and simulation environment.
 
 ### 7.6 Station Registry (`data_preparation/05b_build_station_registry.py`)
-- Builds a `stations.json` registry from GeoJSON station data, snapping stations to the railway graph nodes and computing platform counts.
-- Output: `data/processed/geojson/{country}/stations.json` — a dict keyed by node ID, each entry containing station name, coordinates, and platform_count.
+- Builds a `stations.json` registry from GeoJSON station data, snapping stations to the railway graph nodes.
+- **Deduplication:** Uses 500m spatial clustering to merge duplicate stations and assigns a `display_name` to handle naming collisions.
+- **Platform Counts:** Accurately determines platform counts by cross-referencing actual OSM platform geometries (extracted via `extract_platforms_only.py`), using curated overrides, and parsing OSM platform tags. Records the `platform_source`.
+- **Validation:** Platform counts are tested against real-world anchor stations using `validate_station_registry.py`.
+- Output: `data/processed/geojson/{country}/stations.json` — a dict keyed by primary OSM ID, each entry containing station name, display name, coordinates, platform count, and platform source.
 - Required for `/api/stations` endpoint to provide platform information in station dropdowns.
 - Depends on: `geopandas`, `core_engine/06_spatial_routing.py` (RailwayRouter for node snapping).
 

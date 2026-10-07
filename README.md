@@ -19,6 +19,8 @@ ARTEMIS/
 │   ├── 04_upload_to_gcs.py
 │   ├── 05_build_network_graph.py
 │   ├── 05b_build_station_registry.py    # Build stations.json registry from GeoJSON
+│   ├── extract_platforms_only.py        # Extracts OSM platform geometries for counting
+│   ├── validate_station_registry.py     # Validates station platform counts against anchors
 │   ├── backup_graphs.py
 │   ├── download_from_gcs.py
 │   ├── overpass_fallback.py
@@ -120,6 +122,9 @@ python data_preparation/05_build_network_graph.py
 ```bash
 # Set your Google Maps API key (or add it to a .env file)
 export GOOGLE_MAPS_API_KEY="your_api_key_here"
+
+# (Optional) Set the target country code (default is "uk")
+export ARTEMIS_COUNTRY="uk"
 
 # Start the interactive web dashboard
 python core_engine/07_visualization_server.py
@@ -264,7 +269,8 @@ Edit `config/countries.json` to:
 - **Haversine Distance:** All edge weights and the A* heuristic use the Haversine formula for accurate great-circle distance on the Earth's surface.
 
 ### Phase 5: RL Simulation Dashboard
-- **Interactive Station Selection:** The `/api/stations` endpoint serves named stations as searchable dropdowns from the pre-built `stations.json` registry (produced by `05b_build_station_registry.py`). Each station entry includes its platform count. Results are cached in-memory.
+- **Interactive Station Selection:** The `/api/stations` endpoint serves named stations as searchable dropdowns from the pre-built `stations.json` registry (produced by `05b_build_station_registry.py`). The registry uses 500m spatial clustering to merge duplicate stations and accurately determines platform counts by cross-referencing actual OSM platform geometries (`extract_platforms_only.py`). Each station entry includes its platform count and the source of that count. Results are cached in-memory.
+- **Dynamic Country Config:** The dashboard uses the `ARTEMIS_COUNTRY` environment variable to dynamically load the appropriate country's network, stations, and RL environment configuration.
 - **Dynamic Train Spawning:** Users queue any number of trains with specific start/end stations. The `ArtemisTrainEnv` snaps coordinates to nearest graph nodes using the KD-Tree and computes A* paths.
 - **Auto-Termination:** The simulation server terminates automatically when all trains reach their destinations.
 - **Decentralized Inference:** The PPO model is called per-train per-tick with each train's local radar observation, producing independent speed decisions.

@@ -47,7 +47,7 @@ KEEP_COLUMNS = [
     "operator", "gauge", "electrified", "maxspeed",
     "usage", "service", "tracks", "bridge", "tunnel",
     "ref", "network", "wikipedia", "wikidata",
-    "platform", "public_transport",
+    "platform", "public_transport", "platforms",
 ]
 
 
@@ -316,6 +316,27 @@ def extract_country(
     combined_file = country_output / f"{country_code}_all_railway.geojson"
     save_geojson(gdf, combined_file)
     result["output_files"].append(str(combined_file))
+
+    # Extract platform features
+    try:
+        from pyrosm import OSM
+        osm = OSM(str(filtered_pbf))
+        console.print("  [dim]Extracting platform features...[/dim]")
+        platforms_gdf = osm.get_data_by_custom_criteria(
+            custom_filter={"railway": ["platform"], "public_transport": ["platform"]},
+            filter_type="keep",
+            keep_nodes=True,
+            keep_ways=True,
+            keep_relations=True,
+            extra_attributes=["name", "ref"]
+        )
+        if platforms_gdf is not None and not platforms_gdf.empty:
+            platforms_file = country_output / f"{country_code}_platforms.geojson"
+            save_geojson(platforms_gdf, platforms_file)
+            result["output_files"].append(str(platforms_file))
+            console.print(f"  [green]✓ Extracted {len(platforms_gdf)} platforms[/green]")
+    except Exception as e:
+        console.print(f"  [red]Failed to extract platforms: {e}[/red]")
 
     result["status"] = "extracted"
     result["duration_s"] = time.time() - start_time

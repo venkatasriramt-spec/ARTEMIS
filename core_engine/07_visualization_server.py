@@ -21,6 +21,7 @@ import networkx as nx
 from dotenv import load_dotenv
 
 load_dotenv()
+COUNTRY_CODE = os.getenv("ARTEMIS_COUNTRY", "uk")
 
 # Imports
 base_dir = Path(__file__).resolve().parent.parent
@@ -54,7 +55,7 @@ def get_stations():
     if station_cache is not None:
         return station_cache
 
-    registry_path = base_dir / "data" / "processed" / "geojson" / "uk" / "stations.json"
+    registry_path = base_dir / "data" / "processed" / "geojson" / COUNTRY_CODE / "stations.json"
     if registry_path.exists():
         import json
         with open(registry_path, "r", encoding="utf-8") as f:
@@ -76,7 +77,7 @@ def get_network():
     if network_geojson_cache is not None:
         return JSONResponse(content=network_geojson_cache)
 
-    geojson_path = base_dir / "data" / "processed" / "geojson" / "uk" / "uk_network_lines.geojson"
+    geojson_path = base_dir / "data" / "processed" / "geojson" / COUNTRY_CODE / f"{COUNTRY_CODE}_network_lines.geojson"
     if not geojson_path.exists():
         return JSONResponse(content={"type": "FeatureCollection", "features": []})
 
@@ -104,7 +105,7 @@ def add_trains(req: AddTrainsRequest):
 
     if rl_sim is None or not rl_sim.running:
         # First train(s) — start the simulation
-        rl_sim = RLSimController(country="uk", trains=configs)
+        rl_sim = RLSimController(country=COUNTRY_CODE, trains=configs)
         rl_sim.start()
         return {"status": "started", "count": len(configs)}
     else:
@@ -450,7 +451,7 @@ async function loadStations() {
         const stations = await res.json();
         let html = '<option value="">Choose station…</option>';
         stations.forEach(s => { 
-            const platCount = s.platform_count !== null ? s.platform_count : '?';
+            const platCount = s.platform_count !== null ? (s.platform_source ? `${s.platform_count} (${s.platform_source})` : s.platform_count) : '?';
             html += `<option value="${s.lat},${s.lon}">${s.name} (Platforms: ${platCount})</option>`; 
         });
         document.getElementById('sel-start').innerHTML = html;
@@ -463,7 +464,7 @@ function showStationSidebar(stn) {
     activeStation = stn;
     document.getElementById('station-panel').style.display = 'block';
     document.getElementById('sp-name').textContent = stn.name;
-    document.getElementById('sp-coords').textContent = `${stn.lat.toFixed(4)}, ${stn.lon.toFixed(4)} | Platforms: ${stn.platform_count !== null ? stn.platform_count : '?'}`;
+    document.getElementById('sp-coords').textContent = `${stn.lat.toFixed(4)}, ${stn.lon.toFixed(4)} | Platforms: ${stn.platform_count !== null ? (stn.platform_source ? `${stn.platform_count} (${stn.platform_source})` : stn.platform_count) : '?'}`;
 
 }
 

@@ -249,13 +249,16 @@ This document records the chronological development of ARTEMIS, including all ma
 - **Updated** `.gitignore` to exclude all `.zip` model files and commit only the `_weights/` directories.
 
 ### 2026-10-07 — Station Registry Script & Visualization Server Update
+- **Created** `data_preparation/extract_platforms_only.py` — Extracts OSM platform geometries to `data/processed/geojson/[country]/[country]_platforms.geojson` to accurately count physical platforms.
 - **Created** `data_preparation/05b_build_station_registry.py` — Builds a `stations.json` registry from GeoJSON station data.
+  - Groups duplicate stations using a 500m spatial clustering radius and assigns disambiguated `display_name`s.
   - Snaps stations to railway graph nodes via `RailwayRouter.find_nearest_node()`.
-  - Computes platform counts from graph degree + jitter.
-  - Output: `data/processed/geojson/{country}/stations.json` — dict keyed by node ID, each entry containing station name, coordinates, and platform_count.
-- **Updated** `core_engine/07_visualization_server.py` — `/api/stations` endpoint now reads from `stations.json` registry instead of parsing `[country]_stations.geojson` directly. Frontend now displays platform counts in station dropdowns and sidebar.
-- **Updated** `README.md` — Added `05b_build_station_registry.py` to project structure; updated `/api/stations` description to reflect registry-based station loading.
-- **Updated** `docs/software_requirements_document.md` — Added subsection documenting the station registry script.
+  - Determines platform counts by cross-referencing OSM platform geometries, curated overrides, and OSM tags (recording `platform_source`).
+  - Output: `data/processed/geojson/{country}/stations.json` — dict keyed by primary OSM ID.
+- **Created** `data_preparation/validate_station_registry.py` — Validates the station registry platform counts against real-world anchor stations (e.g., London King's Cross, Edinburgh Waverley).
+- **Updated** `core_engine/07_visualization_server.py` — Now uses the `ARTEMIS_COUNTRY` environment variable (default: `uk`) to dynamically load appropriate country networks. `/api/stations` endpoint now reads from `stations.json` registry and the frontend displays platform counts along with their sources.
+- **Updated** `README.md` — Added new scripts to project structure and updated `/api/stations` description to reflect clustering, platform counts, and `ARTEMIS_COUNTRY`.
+- **Updated** `docs/software_requirements_document.md` — Added subsection documenting the advanced station registry logic and updated server config to include `ARTEMIS_COUNTRY`.
 - **Updated** `data_preparation/02_extract_railway.py` — Bypassed the `osmium` pre-filtering step entirely because the VM was upgraded to 96GB RAM, allowing raw `.osm.pbf` files to be processed directly into memory. Added `platform` and `public_transport` to `KEEP_COLUMNS`.
 
 ### 2026-10-07 — .gitignore Review
